@@ -2,7 +2,6 @@
 #define ELOG_CURRENT_THREAD_H
 
 #include <cstdint>
-#include <functional>
 #include <thread>
 namespace elog
 {

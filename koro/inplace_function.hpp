@@ -57,6 +57,15 @@ template <size_t BufferSize = 64> class InplaceFunction : public noncopyable
 
 	InplaceFunction(const InplaceFunction&) = delete;
 	InplaceFunction& operator=(const InplaceFunction&) = delete;
+	InplaceFunction& operator=(std::nullptr_t)
+	{
+		if (vtable_)
+		{
+			vtable_->destroy(buffer_);
+		}
+		vtable_ = nullptr;
+		return *this;
+	}
 
 	InplaceFunction(InplaceFunction&& other) noexcept
 	{
@@ -108,6 +117,17 @@ template <size_t BufferSize = 64> class InplaceFunction : public noncopyable
 	explicit operator bool() const noexcept
 	{
 		return vtable_ != nullptr;
+	}
+
+	InplaceFunction& swap(InplaceFunction& other)
+	{
+		if (&other == this)
+		{
+			return *this;
+		}
+
+		std::swap(vtable_, other.vtable_);
+		return *this;
 	}
 };
 } // namespace koro

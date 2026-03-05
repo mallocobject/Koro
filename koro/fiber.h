@@ -1,9 +1,9 @@
 #ifndef KORO_FIBER_H
 #define KORO_FIBER_H
 
+#include "koro/inplace_function.hpp"
 #include "koro/noncopyable.h"
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <sys/ucontext.h>
@@ -13,6 +13,7 @@ static const uint32_t STACK_SIZE = 128 * 1024; // 128
 
 class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 {
+	using inplace_function = InplaceFunction<64>;
 	friend std::shared_ptr<Fiber> std::make_shared<Fiber>();
 
   public:
@@ -27,7 +28,7 @@ class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 	State state_{Fiber::State::kReady};
 	uint64_t id_{0};
 	bool run_in_scheduler_{true};
-	std::function<void()> cb_;
+	inplace_function cb_;
 
 	ucontext_t ctx_;
 	uint32_t stack_size_{0};
@@ -38,11 +39,11 @@ class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 
   public:
 	// for creating scheduled fiber or child fiber
-	Fiber(std::function<void()> cb, uint32_t stack_size = 128 * 1024,
+	Fiber(inplace_function cb, uint32_t stack_size = 128 * 1024,
 		  bool run_in_scheduler = true);
 	~Fiber();
 
-	void clear(std::function<void()> cb);
+	void clear(inplace_function cb);
 	void resume();
 	void yield();
 	uint64_t id() const

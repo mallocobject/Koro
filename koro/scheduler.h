@@ -1,14 +1,14 @@
 #ifndef KORO_SCHEDULER_H
 #define KORO_SCHEDULER_H
 
+#include "koro/inplace_function.hpp"
 #include "koro/noncopyable.h"
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
-#include <functional>
+#include <deque>
 #include <memory>
 #include <mutex>
-#include <queue>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -17,23 +17,23 @@ namespace koro
 class Fiber;
 class Scheduler : public noncopyable
 {
+	using inplace_function = InplaceFunction<64>;
+
   private:
 	struct ScheduledTask
 	{
 		std::shared_ptr<Fiber> fiber;
-		std::function<void()> cb;
-		std::thread::id tid;
+		inplace_function cb;
 
 		ScheduledTask()
 		{
 		}
 
 		ScheduledTask(ScheduledTask&& other)
-			: fiber(other.fiber), cb(std::move(other.cb)), tid(other.tid)
+			: fiber(other.fiber), cb(std::move(other.cb))
 		{
 			other.fiber = nullptr;
 			other.cb = nullptr;
-			tid = std::thread::id();
 		}
 
 		ScheduledTask& operator=(ScheduledTask&& other)
@@ -44,32 +44,28 @@ class Scheduler : public noncopyable
 			}
 
 			fiber = other.fiber;
-			cb = other.cb;
-			tid = other.tid;
+			cb = std::move(other.cb);
 
 			other.fiber = nullptr;
 			other.cb = nullptr;
-			tid = std::thread::id();
 
 			return *this;
 		}
 
-		ScheduledTask(std::shared_ptr<Fiber> f, std::thread::id t)
-			: fiber(f), tid(t)
+		ScheduledTask(std::shared_ptr<Fiber> f) : fiber(f)
 		{
 		}
 
-		ScheduledTask(std::shared_ptr<Fiber>* f, std::thread::id t) : tid(t)
+		ScheduledTask(std::shared_ptr<Fiber>* f)
 		{
 			fiber.swap(*f);
 		}
 
-		ScheduledTask(std::function<void()> f, std::thread::id t)
-			: cb(std::move(f)), tid(t)
+		ScheduledTask(inplace_function f) : cb(std::move(f))
 		{
 		}
 
-		ScheduledTask(std::function<void()>* f, std::thread::id t) : tid(t)
+		ScheduledTask(inplace_function* f)
 		{
 			cb.swap(*f);
 		}
@@ -78,30 +74,24 @@ class Scheduler : public noncopyable
 		{
 			fiber = nullptr;
 			cb = nullptr;
-			tid = std::thread::id();
 		}
 	};
 
-	// struct Data
-	// {
-	// 	std::deque<ScheduledTask> queue;
-	// 	std::mutex mtx;
-	// 	std::condition_variable cv;
-	// };
+	struct Data
+	{
+		std::deque<ScheduledTask> tasks;
+		std::mutex mtx;
+		std::condition_variable cv;
+	};
 
   private:
 	std::mutex mtx_;
-	std::condition_variable cv_;
 
-	std::vector<std::shared_ptr<std::thread>> threads_;
-	std::queue<ScheduledTask> tasks_;
-	// std::vector<std::thread> threads_;
-	// std::vector<std::unique_ptr<Data>> data_;
-	std::atomic<size_t> next_thread_index_{0};
+	std::vector<std::thread> threads_;
+	std::vector<std::unique_ptr<Data>> data_;
+	std::atomic<size_t> thread_to_post_index_{0};
 
-	// size_t thread_count_{0};
 	std::atomic<size_t> active_thread_count_{0};
-	std::atomic<size_t> idle_thread_count_{0};
 
 	std::atomic<bool> stop_{false};
 
@@ -109,26 +99,32 @@ class Scheduler : public noncopyable
 	Scheduler(size_t thread_num = 1);
 	virtual ~Scheduler();
 
-	template <typename F>
-		requires std::is_same_v<std::decay_t<F>, std::shared_ptr<Fiber>> ||
-				 std::invocable<F> &&
-					 std::same_as<std::invoke_result_t<F>, void>
-				 void postTask(F f, std::thread::id tid = std::thread::id())
+	template <typename CF>
+		requires std::is_same_v<std::decay_t<CF>, std::shared_ptr<Fiber>> ||
+				 std::invocable<CF> &&
+					 std::same_as<std::invoke_result_t<CF>, void>
+				 void submit(CF&& cf)
 	{
 		bool need_tickle = false;
+
+		// fetch_add return old val
+		// xxx algorithm
+		auto& data = *data_[thread_to_post_index_.fetch_add(
+								1, std::memory_order_acq_rel) %
+							threads_.size()];
 		{
-			std::lock_guard<std::mutex> lock(mtx_);
-			need_tickle = tasks_.empty();
-			ScheduledTask task(f, tid);
+			std::lock_guard<std::mutex> lock(data.mtx);
+			need_tickle = data.tasks.empty();
+			ScheduledTask task(cf);
 			if (task.fiber || task.cb)
 			{
-				tasks_.push(std::move(task));
+				data.tasks.push_back(std::move(task));
 			}
 		}
 
 		if (need_tickle)
 		{
-			tickle();
+			data.cv.notify_one();
 		}
 	}
 
@@ -141,18 +137,23 @@ class Scheduler : public noncopyable
 	void setLocalStance();
 
 	virtual void tickle();
-	virtual void run();
+	virtual void run(size_t thread_index);
 	virtual void idle();
 
 	virtual bool stopping()
 	{
 		std::lock_guard<std::mutex> lock(mtx_);
-		return stop_ && tasks_.empty() && (active_thread_count_ == 0);
+		for (const auto& data : data_)
+		{
+			stop_ = stop_ && data->tasks.empty();
+		}
+		return stop_ && (active_thread_count_ == 0);
 	}
 
 	bool hasIdleThread() const
 	{
-		return idle_thread_count_ > 0;
+		return threads_.size() >
+			   active_thread_count_.load(std::memory_order_relaxed);
 	}
 
   public:

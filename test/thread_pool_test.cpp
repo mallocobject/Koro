@@ -1,7 +1,7 @@
+#include "elog/logger.h"
 #include "koro/thread_pool.h"
 #include <chrono>
 #include <cmath>
-#include <iostream>
 #include <thread>
 
 using namespace koro;
@@ -22,7 +22,7 @@ int main()
 
 	ThreadPool tp(pool_size);
 
-	std::cout << "Thread Pool Size:     " << pool_size << std::endl;
+	LOG_INFO << "Thread Pool Size:     " << pool_size;
 
 	const int task_count = 1000;  // 任务总数
 	const int intensity = 100000; // 单个任务的循环次数
@@ -48,9 +48,9 @@ int main()
 						end_time - start_time)
 						.count();
 
-	std::cout << "  - Total Duration:       " << duration << " ms" << std::endl;
-	std::cout << "  - Checksum:             " << total_sum
-			  << " (Prevention of optimization)" << std::endl;
+	LOG_INFO << "  - Total Duration:       " << duration << " ms";
+	LOG_INFO << "  - Checksum:             " << total_sum
+			 << " (Prevention of optimization)";
 
 	return 0;
 }

@@ -19,8 +19,7 @@ thread_local Fiber* t_scheduled_fiber = nullptr;  // 调度协程
 static std::atomic<uint64_t> s_fiber_id{1};
 static std::atomic<uint64_t> s_fiber_count{0};
 
-Fiber::Fiber(std::function<void()> cb, uint32_t stack_size,
-			 bool run_in_scheduler)
+Fiber::Fiber(inplace_function cb, uint32_t stack_size, bool run_in_scheduler)
 	: cb_(std::move(cb)), run_in_scheduler_(run_in_scheduler),
 	  state_(State::kReady), stack_size_(stack_size)
 {
@@ -82,7 +81,7 @@ Fiber::~Fiber()
 	}
 }
 
-void Fiber::clear(std::function<void()> cb)
+void Fiber::clear(inplace_function cb)
 {
 	assert(stack_sp_ && state_ == State::kTerm);
 

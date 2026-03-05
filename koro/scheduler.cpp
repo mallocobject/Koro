@@ -16,12 +16,13 @@ using namespace koro;
 thread_local Scheduler* t_scheduler = nullptr;
 
 Scheduler::Scheduler(size_t thread_count)
-	: active_thread_count_(0), idle_thread_count_(0), stop_(false)
+	: thread_to_post_index_(0), active_thread_count_(0), stop_(false)
 {
 	assert(thread_count > 0 && !localStance());
 	setLocalStance();
 
 	threads_.resize(thread_count);
+	data_.resize(thread_count);
 
 	LOG_DEBUG << "create scheduler successfully";
 }
@@ -48,8 +49,12 @@ void Scheduler::init()
 
 		for (size_t i = 0; i < threads_.size(); i++)
 		{
-			threads_[i] =
-				std::make_shared<std::thread>(std::bind(&Scheduler::run, this));
+			data_[i] = std::make_unique<Data>();
+		}
+
+		for (size_t i = 0; i < threads_.size(); i++)
+		{
+			threads_[i] = std::thread(std::bind(&Scheduler::run, this, i));
 		}
 	}
 
@@ -63,17 +68,21 @@ void Scheduler::stop()
 	{
 		return;
 	}
-	cv_.notify_all();
 
-	std::vector<std::shared_ptr<std::thread>> tmp;
+	for (const auto& datum : data_)
+	{
+		datum->cv.notify_one();
+	}
+
+	std::vector<std::thread> tmp;
 	{
 		std::lock_guard<std::mutex> lock(mtx_);
 		tmp.swap(threads_);
 	}
 
-	for (const auto& t : tmp)
+	for (auto& t : tmp)
 	{
-		t->join();
+		t.join();
 	}
 
 	LOG_DEBUG << "scheduler ends";
@@ -86,10 +95,9 @@ void Scheduler::setLocalStance()
 
 void Scheduler::tickle()
 {
-	cv_.notify_one();
 }
 
-void Scheduler::run()
+void Scheduler::run(size_t thread_index)
 {
 	uint64_t tid = elog::CurrentThread::tid();
 	LOG_DEBUG << "scheduler runs in thread: " << tid;
@@ -97,28 +105,45 @@ void Scheduler::run()
 	setLocalStance();
 
 	Fiber::curFiberPtr();
-
+	Data& data = *data_[thread_index];
 	ScheduledTask task;
 	while (true)
 	{
 		task.clear();
-		bool need_tickle = false;
+		// bool need_tickle = false;
 		{
-			std::unique_lock<std::mutex> lock(mtx_);
-			cv_.wait(lock, [this] { return stop_ || !tasks_.empty(); });
-			if (stop_ && tasks_.empty())
+			std::unique_lock<std::mutex> lock(data.mtx);
+			if (!data.tasks.empty())
+			{
+				task = std::move(data.tasks.front());
+				data.tasks.pop_front();
+			}
+			else if (!stop_.load(std::memory_order_acquire))
+			{
+				lock.unlock();
+				task = std::move(stealTask(thread_index));
+				if (!task.cb && !task.fiber)
+				{
+					lock.lock();
+					if (!data.tasks.empty() && !stop_)
+					{
+						data.cv.wait(
+							lock,
+							[&data, this] {
+								return stop_.load(std::memory_order_acquire) ||
+									   !data.tasks.empty();
+							});
+					}
+					continue;
+				}
+			}
+			else
 			{
 				break;
 			}
-			task = std::move(tasks_.front());
-			tasks_.pop();
-			need_tickle = !tasks_.empty();
 		}
+
 		active_thread_count_.fetch_add(1, std::memory_order_acq_rel);
-		if (need_tickle)
-		{
-			tickle();
-		}
 
 		assert(task.fiber || task.cb);
 
@@ -135,7 +160,7 @@ void Scheduler::run()
 		}
 		else if (task.cb)
 		{
-			auto fiber_guard = std::make_shared<Fiber>(task.cb);
+			auto fiber_guard = std::make_shared<Fiber>(std::move(task.cb));
 			{
 				std::lock_guard<std::mutex> lock(fiber_guard->mtx_);
 				fiber_guard->resume();
@@ -152,4 +177,22 @@ void Scheduler::idle()
 Scheduler* Scheduler::localStance()
 {
 	return t_scheduler;
+}
+
+Scheduler::ScheduledTask Scheduler::stealTask(size_t thief_id)
+{
+	ScheduledTask task;
+	for (size_t i = 1; i < data_.size(); i++)
+	{
+		size_t victim = (thief_id + i) % data_.size();
+		auto& data = *data_[victim];
+		std::unique_lock<std::mutex> lock(data.mtx, std::try_to_lock);
+		if (lock.owns_lock() && !data.tasks.empty())
+		{
+			task = std::move(data.tasks.back());
+			data.tasks.pop_back();
+			return task;
+		}
+	}
+	return task;
 }

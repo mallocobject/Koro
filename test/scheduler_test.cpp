@@ -37,7 +37,7 @@ int main()
 
 	for (int i = 0; i < task_count; ++i)
 	{
-		s->postTask(std::bind(&compute, i, intensity, &results[i]));
+		s->submit(std::bind(&compute, i, intensity, &results[i]));
 	}
 
 	s->stop();
