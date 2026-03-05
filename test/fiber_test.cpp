@@ -8,6 +8,12 @@ int main()
 {
 	Fiber::curFiberPtr();
 
-	auto f = std::make_shared<Fiber>([] { LOG_INFO << "Hello world"; });
+	auto f = std::make_shared<Fiber>(
+		[]
+		{
+			LOG_INFO << "Hello world";
+			Fiber::curFiberPtr()->yield();
+		});
+
 	f->resume();
 }

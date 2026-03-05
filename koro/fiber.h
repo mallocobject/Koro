@@ -33,6 +33,7 @@ class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 	uint32_t stack_size_{0};
 	void* stack_sp_{nullptr};
 
+  public:
 	std::mutex mtx_;
 
   public:

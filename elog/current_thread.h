@@ -12,7 +12,7 @@ inline uint64_t tid()
 {
 	thread_local uint64_t cached_tid =
 		std::hash<std::thread::id>{}(std::this_thread::get_id());
-	return cached_tid;
+	return cached_tid + 1;
 }
 
 inline std::string& str()

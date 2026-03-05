@@ -3,10 +3,12 @@
 
 #include "koro/noncopyable.h"
 #include <atomic>
+#include <condition_variable>
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -24,6 +26,32 @@ class Scheduler : public noncopyable
 
 		ScheduledTask()
 		{
+		}
+
+		ScheduledTask(ScheduledTask&& other)
+			: fiber(other.fiber), cb(std::move(other.cb)), tid(other.tid)
+		{
+			other.fiber = nullptr;
+			other.cb = nullptr;
+			tid = std::thread::id();
+		}
+
+		ScheduledTask& operator=(ScheduledTask&& other)
+		{
+			if (this == &other)
+			{
+				return *this;
+			}
+
+			fiber = other.fiber;
+			cb = other.cb;
+			tid = other.tid;
+
+			other.fiber = nullptr;
+			other.cb = nullptr;
+			tid = std::thread::id();
+
+			return *this;
 		}
 
 		ScheduledTask(std::shared_ptr<Fiber> f, std::thread::id t)
@@ -54,29 +82,38 @@ class Scheduler : public noncopyable
 		}
 	};
 
+	// struct Data
+	// {
+	// 	std::deque<ScheduledTask> queue;
+	// 	std::mutex mtx;
+	// 	std::condition_variable cv;
+	// };
+
   private:
 	std::mutex mtx_;
-	std::vector<std::shared_ptr<std::thread>> threads_;
-	std::vector<ScheduledTask> tasks_;
+	std::condition_variable cv_;
 
-	size_t thread_count_{0};
+	std::vector<std::shared_ptr<std::thread>> threads_;
+	std::queue<ScheduledTask> tasks_;
+	// std::vector<std::thread> threads_;
+	// std::vector<std::unique_ptr<Data>> data_;
+	std::atomic<size_t> next_thread_index_{0};
+
+	// size_t thread_count_{0};
 	std::atomic<size_t> active_thread_count_{0};
 	std::atomic<size_t> idle_thread_count_{0};
 
-	bool use_caller_{true};
-	std::shared_ptr<Fiber> main_scheduled_fiber_;
-	std::thread::id main_thread_id_;
-
-	bool stop_{false};
+	std::atomic<bool> stop_{false};
 
   public:
-	Scheduler(size_t thread_num = 1, bool use_caller = true);
+	Scheduler(size_t thread_num = 1);
 	virtual ~Scheduler();
 
 	template <typename F>
 		requires std::is_same_v<std::decay_t<F>, std::shared_ptr<Fiber>> ||
-				 std::is_same_v<std::decay_t<F>, std::function<void()>>
-	void postTask(F f, std::thread::id tid)
+				 std::invocable<F> &&
+					 std::same_as<std::invoke_result_t<F>, void>
+				 void postTask(F f, std::thread::id tid = std::thread::id())
 	{
 		bool need_tickle = false;
 		{
@@ -85,7 +122,7 @@ class Scheduler : public noncopyable
 			ScheduledTask task(f, tid);
 			if (task.fiber || task.cb)
 			{
-				tasks_.push_back(task);
+				tasks_.push(std::move(task));
 			}
 		}
 
@@ -94,6 +131,8 @@ class Scheduler : public noncopyable
 			tickle();
 		}
 	}
+
+	ScheduledTask stealTask(size_t thief_id);
 
 	virtual void init();
 	virtual void stop();

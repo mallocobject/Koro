@@ -13,7 +13,6 @@
 #include <memory>
 #include <ostream>
 #include <string_view>
-#include <type_traits>
 
 namespace elog
 {
@@ -199,16 +198,16 @@ class Logger : public noncopyable
 	};
 };
 
-#define LYNX_TRACE LogLevel::TRACE
-#define LYNX_DEBUG LogLevel::DEBUG
-#define LYNX_INFO LogLevel::INFO
-#define LYNX_WARN LogLevel::WARN
-#define LYNX_ERROR LogLevel::ERROR
-#define LYNX_FATAL LogLevel::FATAL
-#define LYNX_OFF LogLevel::OFF
+#define ELOG_TRACE LogLevel::TRACE
+#define ELOG_DEBUG LogLevel::DEBUG
+#define ELOG_INFO LogLevel::INFO
+#define ELOG_WARN LogLevel::WARN
+#define ELOG_ERROR LogLevel::ERROR
+#define ELOG_FATAL LogLevel::FATAL
+#define ELOG_OFF LogLevel::OFF
 
 #ifndef ELOG_LEVEL_SETTING
-#define ELOG_LEVEL_SETTING LYNX_INFO
+#define ELOG_LEVEL_SETTING ELOG_INFO
 #endif
 
 constexpr LogLevel GLOBAL_MIN_LEVEL = static_cast<LogLevel>(ELOG_LEVEL_SETTING);

@@ -46,7 +46,7 @@ template <size_t BufferSize = 64> class InplaceFunction : public noncopyable
 	}
 
 	template <typename F>
-		requires std::is_same_v<std::decay_t<F>, InplaceFunction>
+		requires(!std::is_same_v<std::decay_t<F>, InplaceFunction>)
 	InplaceFunction(F&& f)
 	{
 		using DecayedF = std::decay_t<F>;

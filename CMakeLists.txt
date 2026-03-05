@@ -8,14 +8,17 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the build type" FORCE)
 endif()
 
-if(NOT LOG_LEVEL)
+if(DEFINED LOG_LEVEL AND NOT LOG_LEVEL MATCHES "^(DEBUG|INFO|WARN|ERROR)$")
+    message(WARNING "Invalid LOG_LEVEL value, will be overridden by build type")
+endif()
+if(NOT DEFINED LOG_LEVEL OR LOG_LEVEL STREQUAL "")
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(LOG_LEVEL "Debug" CACHE STRING "elog level")
-    elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set(LOG_LEVEL "INFO" CACHE STRING "elog level")
+        set(LOG_LEVEL "DEBUG" CACHE STRING "elog level" FORCE)
     else()
-        set(LOG_LEVEL "INFO" CACHE STRING "elog level")
+        set(LOG_LEVEL "INFO" CACHE STRING "elog level" FORCE)
     endif()
+else()
+    message(STATUS "Using user-specified LOG_LEVEL: ${LOG_LEVEL}")
 endif()
 
 set_property(CACHE LOG_LEVEL PROPERTY STRINGS
@@ -23,7 +26,7 @@ set_property(CACHE LOG_LEVEL PROPERTY STRINGS
 )
 
 message(STATUS "Current logger level: ${LOG_LEVEL}")
-add_definitions(-DELOG_LEVEL_SETTING=LYNX_${LOG_LEVEL})
+add_definitions(-DELOG_LEVEL_SETTING=ELOG_${LOG_LEVEL})
 message(STATUS "cmake build mode: ${CMAKE_BUILD_TYPE}")
 
 add_subdirectory(elog)

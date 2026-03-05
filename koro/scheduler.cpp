@@ -1,37 +1,31 @@
 #include "koro/scheduler.h"
+#include "elog/current_thread.h"
 #include "elog/logger.h"
 #include "koro/fiber.h"
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 using namespace koro;
 
 thread_local Scheduler* t_scheduler = nullptr;
 
-Scheduler::Scheduler(size_t thread_count, bool use_caller)
-	: active_thread_count_(0), idle_thread_count_(0), use_caller_(use_caller),
-	  stop_(false), thread_count_(thread_count)
+Scheduler::Scheduler(size_t thread_count)
+	: active_thread_count_(0), idle_thread_count_(0), stop_(false)
 {
-	assert(thread_count_ > 0 && !localStance());
+	assert(thread_count > 0 && !localStance());
 	setLocalStance();
 
-	if (use_caller)
-	{
-		thread_count_--;
-		localStance();
-
-		main_scheduled_fiber_ =
-			std::make_shared<Fiber>(std::bind(&Scheduler::run, this), 0, false);
-		Fiber::setSchduledFiber(main_scheduled_fiber_.get());
-		main_thread_id_ = std::this_thread::get_id();
-	}
+	threads_.resize(thread_count);
 
 	LOG_DEBUG << "create scheduler successfully";
 }
+
 Scheduler::~Scheduler()
 {
 	assert(stop_);
@@ -46,33 +40,116 @@ void Scheduler::init()
 {
 	{
 		std::lock_guard<std::mutex> lock(mtx_);
-		if (stop_)
+		if (stop_.load(std::memory_order_relaxed))
 		{
 			LOG_ERROR << "scheduler is stopped";
 			return;
 		}
 
-		assert(threads_.empty());
-		threads_.reserve(thread_count_);
-		for (size_t i = 0; i < thread_count_; i++)
+		for (size_t i = 0; i < threads_.size(); i++)
 		{
-			auto thread =
+			threads_[i] =
 				std::make_shared<std::thread>(std::bind(&Scheduler::run, this));
-			threads_.push_back(thread);
 		}
 	}
 
-	LOG_DEBUG << "initialize scheduler successfully";
+	LOG_DEBUG << "initialize scheduler successfully with " << threads_.size()
+			  << " threads";
 }
 
 void Scheduler::stop()
 {
+	if (stop_.exchange(true, std::memory_order_acq_rel))
+	{
+		return;
+	}
+	cv_.notify_all();
+
+	std::vector<std::shared_ptr<std::thread>> tmp;
+	{
+		std::lock_guard<std::mutex> lock(mtx_);
+		tmp.swap(threads_);
+	}
+
+	for (const auto& t : tmp)
+	{
+		t->join();
+	}
+
+	LOG_DEBUG << "scheduler ends";
 }
 
-void Scheduler::setLocalStance();
+void Scheduler::setLocalStance()
+{
+	t_scheduler = this;
+}
 
-void Scheduler::tickle();
-void Scheduler::run();
-void Scheduler::idle();
+void Scheduler::tickle()
+{
+	cv_.notify_one();
+}
 
-Scheduler* Scheduler::localStance();
+void Scheduler::run()
+{
+	uint64_t tid = elog::CurrentThread::tid();
+	LOG_DEBUG << "scheduler runs in thread: " << tid;
+
+	setLocalStance();
+
+	Fiber::curFiberPtr();
+
+	ScheduledTask task;
+	while (true)
+	{
+		task.clear();
+		bool need_tickle = false;
+		{
+			std::unique_lock<std::mutex> lock(mtx_);
+			cv_.wait(lock, [this] { return stop_ || !tasks_.empty(); });
+			if (stop_ && tasks_.empty())
+			{
+				break;
+			}
+			task = std::move(tasks_.front());
+			tasks_.pop();
+			need_tickle = !tasks_.empty();
+		}
+		active_thread_count_.fetch_add(1, std::memory_order_acq_rel);
+		if (need_tickle)
+		{
+			tickle();
+		}
+
+		assert(task.fiber || task.cb);
+
+		if (task.fiber)
+		{
+			{
+				std::lock_guard<std::mutex> lock(task.fiber->mtx_);
+				if (task.fiber->state() != Fiber::State::kTerm)
+				{
+					task.fiber->resume();
+				}
+			}
+			active_thread_count_.fetch_sub(1, std::memory_order_acq_rel);
+		}
+		else if (task.cb)
+		{
+			auto fiber_guard = std::make_shared<Fiber>(task.cb);
+			{
+				std::lock_guard<std::mutex> lock(fiber_guard->mtx_);
+				fiber_guard->resume();
+			}
+			active_thread_count_.fetch_sub(1, std::memory_order_acq_rel);
+		}
+	}
+}
+
+void Scheduler::idle()
+{
+}
+
+Scheduler* Scheduler::localStance()
+{
+	return t_scheduler;
+}

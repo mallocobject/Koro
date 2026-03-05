@@ -86,7 +86,7 @@ void Fiber::clear(std::function<void()> cb)
 {
 	assert(stack_sp_ && state_ == State::kTerm);
 
-	state_ = State::kTerm;
+	state_ = State::kReady;
 	cb_ = std::move(cb);
 
 	if (getcontext(&ctx_))
@@ -202,8 +202,14 @@ void Fiber::mainFunc()
 	cur->cb_ = nullptr;
 	cur->state_ = State::kTerm;
 
+	// LOG_DEBUG << "before yield";
+
+	// cur->yield(); // co_return
+
 	// 减少计数，外部持有共享指针，不会提前释放
 	Fiber* raw_ptr = cur.get();
 	cur.reset(); // cur == t_fiber
 	raw_ptr->yield();
+
+	// LOG_DEBUG << "after yield"; // never run this
 }
