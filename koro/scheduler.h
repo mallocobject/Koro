@@ -17,13 +17,13 @@ namespace koro
 class Fiber;
 class Scheduler : public noncopyable
 {
-	using inplace_function = InplaceFunction<64>;
+	using function = InplaceFunction<64>;
 
   private:
 	struct ScheduledTask
 	{
 		std::shared_ptr<Fiber> fiber;
-		inplace_function cb;
+		function cb;
 
 		ScheduledTask()
 		{
@@ -61,11 +61,11 @@ class Scheduler : public noncopyable
 			fiber.swap(*f);
 		}
 
-		ScheduledTask(inplace_function f) : cb(std::move(f))
+		ScheduledTask(function f) : cb(std::move(f))
 		{
 		}
 
-		ScheduledTask(inplace_function* f)
+		ScheduledTask(function* f)
 		{
 			cb.swap(*f);
 		}
@@ -96,7 +96,7 @@ class Scheduler : public noncopyable
 	std::atomic<bool> stop_{false};
 
   public:
-	Scheduler(size_t thread_num = 1);
+	Scheduler(size_t thread_count = 1);
 	virtual ~Scheduler();
 
 	template <typename CF>

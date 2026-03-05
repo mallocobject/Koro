@@ -5,7 +5,6 @@
 #include "koro/noncopyable.h"
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <sys/ucontext.h>
 namespace koro
 {
@@ -13,7 +12,7 @@ static const uint32_t STACK_SIZE = 128 * 1024; // 128
 
 class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 {
-	using inplace_function = InplaceFunction<64>;
+	using function = InplaceFunction<64>;
 	friend std::shared_ptr<Fiber> std::make_shared<Fiber>();
 
   public:
@@ -28,22 +27,22 @@ class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 	State state_{Fiber::State::kReady};
 	uint64_t id_{0};
 	bool run_in_scheduler_{true};
-	inplace_function cb_;
+	function cb_;
 
 	ucontext_t ctx_;
 	uint32_t stack_size_{0};
 	void* stack_sp_{nullptr};
 
   public:
-	std::mutex mtx_;
+	// std::mutex mtx_;
 
   public:
 	// for creating scheduled fiber or child fiber
-	Fiber(inplace_function cb, uint32_t stack_size = 128 * 1024,
+	Fiber(function cb, uint32_t stack_size = 128 * 1024,
 		  bool run_in_scheduler = true);
 	~Fiber();
 
-	void clear(inplace_function cb);
+	void clear(function cb);
 	void resume();
 	void yield();
 	uint64_t id() const

@@ -37,6 +37,10 @@ template <size_t BufferSize = 64> class InplaceFunction : public noncopyable
 	{
 	}
 
+	InplaceFunction(std::nullptr_t) : vtable_(nullptr)
+	{
+	}
+
 	~InplaceFunction()
 	{
 		if (vtable_)
@@ -46,7 +50,8 @@ template <size_t BufferSize = 64> class InplaceFunction : public noncopyable
 	}
 
 	template <typename F>
-		requires(!std::is_same_v<std::decay_t<F>, InplaceFunction>)
+		requires(!std::is_same_v<std::decay_t<F>, InplaceFunction> &&
+				 !std::is_same_v<std::decay_t<F>, std::nullptr_t>)
 	InplaceFunction(F&& f)
 	{
 		using DecayedF = std::decay_t<F>;

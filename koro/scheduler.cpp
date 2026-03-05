@@ -1,6 +1,6 @@
 #include "koro/scheduler.h"
-#include "elog/current_thread.h"
 #include "elog/logger.h"
+#include "koro/current_thread.h"
 #include "koro/fiber.h"
 #include <atomic>
 #include <cassert>
@@ -62,6 +62,7 @@ void Scheduler::init()
 			  << " threads";
 }
 
+// blocking, return only if all tasks are finished
 void Scheduler::stop()
 {
 	if (stop_.exchange(true, std::memory_order_acq_rel))
@@ -99,7 +100,7 @@ void Scheduler::tickle()
 
 void Scheduler::run(size_t thread_index)
 {
-	uint64_t tid = elog::CurrentThread::tid();
+	uint64_t tid = CurrentThread::tid();
 	LOG_DEBUG << "scheduler runs in thread: " << tid;
 
 	setLocalStance();
@@ -120,8 +121,8 @@ void Scheduler::run(size_t thread_index)
 			}
 			else if (!stop_.load(std::memory_order_acquire))
 			{
-				lock.unlock();
-				task = std::move(stealTask(thread_index));
+				lock.unlock(); // 支持：我偷别人的，别人偷我的
+				task = stealTask(thread_index);
 				if (!task.cb && !task.fiber)
 				{
 					lock.lock();
@@ -150,23 +151,30 @@ void Scheduler::run(size_t thread_index)
 		if (task.fiber)
 		{
 			{
-				std::lock_guard<std::mutex> lock(task.fiber->mtx_);
+				// std::lock_guard<std::mutex> lock(task.fiber->mtx_);
 				if (task.fiber->state() != Fiber::State::kTerm)
 				{
 					task.fiber->resume();
 				}
+
+				assert(task.fiber->state() != Fiber::State::kRunning);
+
+				if (task.fiber->state() == Fiber::State::kReady)
+				{
+					std::lock_guard<std::mutex> q_lock(data.mtx);
+					data.tasks.push_back(std::move(task));
+				}
 			}
-			active_thread_count_.fetch_sub(1, std::memory_order_acq_rel);
 		}
 		else if (task.cb)
 		{
 			auto fiber_guard = std::make_shared<Fiber>(std::move(task.cb));
 			{
-				std::lock_guard<std::mutex> lock(fiber_guard->mtx_);
+				// std::lock_guard<std::mutex> lock(fiber_guard->mtx_);
 				fiber_guard->resume();
 			}
-			active_thread_count_.fetch_sub(1, std::memory_order_acq_rel);
 		}
+		active_thread_count_.fetch_sub(1, std::memory_order_acq_rel);
 	}
 }
 
