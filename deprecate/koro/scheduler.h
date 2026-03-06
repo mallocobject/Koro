@@ -1,6 +1,7 @@
 #ifndef KORO_SCHEDULER_H
 #define KORO_SCHEDULER_H
 
+#include "elog/logger.h"
 #include "koro/inplace_function.hpp"
 #include "koro/noncopyable.h"
 #include <atomic>
@@ -14,6 +15,8 @@
 #include <vector>
 namespace koro
 {
+extern thread_local size_t t_thread_idx;
+
 class Fiber;
 class Scheduler : public noncopyable
 {
@@ -93,6 +96,7 @@ class Scheduler : public noncopyable
 
 	std::atomic<size_t> active_thread_count_{0};
 
+  protected:
 	std::atomic<bool> stop_{false};
 
   public:
@@ -109,13 +113,14 @@ class Scheduler : public noncopyable
 
 		// fetch_add return old val
 		// xxx algorithm
-		auto& data = *data_[thread_to_post_index_.fetch_add(
-								1, std::memory_order_acq_rel) %
-							threads_.size()];
+		size_t idx =
+			thread_to_post_index_.fetch_add(1, std::memory_order_acq_rel) %
+			threads_.size();
+		Data& data = *data_[idx];
 		{
 			std::lock_guard<std::mutex> lock(data.mtx);
 			need_tickle = data.tasks.empty();
-			ScheduledTask task(cf);
+			ScheduledTask task(std::move(cf));
 			if (task.fiber || task.cb)
 			{
 				data.tasks.push_back(std::move(task));
@@ -124,7 +129,7 @@ class Scheduler : public noncopyable
 
 		if (need_tickle)
 		{
-			data.cv.notify_one();
+			wakeupThread(idx);
 		}
 	}
 
@@ -140,21 +145,16 @@ class Scheduler : public noncopyable
 	virtual void run(size_t thread_index);
 	virtual void idle();
 
-	virtual bool stopping()
-	{
-		std::lock_guard<std::mutex> lock(mtx_);
-		for (const auto& data : data_)
-		{
-			stop_ = stop_ && data->tasks.empty();
-		}
-		return stop_ && (active_thread_count_ == 0);
-	}
+	virtual bool stopping();
 
 	bool hasIdleThread() const
 	{
 		return threads_.size() >
-			   active_thread_count_.load(std::memory_order_relaxed);
+			   active_thread_count_.load(std::memory_order_acquire);
 	}
+
+	virtual void wakeupThread(int idx);
+	virtual void waitForEvent(int idx);
 
   public:
 	static Scheduler* localStance();

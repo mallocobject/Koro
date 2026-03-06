@@ -9,6 +9,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <vector>
 namespace koro
 {
 class Fiber;
@@ -46,7 +47,7 @@ class IOManager : public Scheduler
 
   private:
 	int epfd_{-1};
-	int wakeup_fd_{-1};
+	std::vector<int> wakeup_fds_;
 	std::atomic<size_t> pending_event_count{0};
 	std::mutex mtx_;
 	std::map<int, FdContext*> fd_ctxes_;
@@ -62,17 +63,20 @@ class IOManager : public Scheduler
 
 	static IOManager* localStance();
 
+	void stop() override;
+
   protected:
 	void tickle() override;
 	void idle() override;
 	bool stopping() override;
 
-	void resetTimer();
+	// void resetTimer();
 
   private:
 	bool cancelEventImpl(FdContext* fd_ctx, Event new_events);
-	void wakeup();
-	void handleRead(); // for wakeup
+
+	void wakeupThread(int idx) override;
+	void waitForEvent(int idx) override; // for wakeup
 };
 } // namespace koro
 
@@ -83,23 +87,11 @@ inline constexpr koro::IOManager::Event operator&(
 								  static_cast<uint8_t>(rhs));
 }
 
-inline constexpr koro::IOManager::Event operator&(
-	const koro::IOManager::Event& lhs, uint8_t rhs)
-{
-	return koro::IOManager::Event(static_cast<uint8_t>(lhs) & rhs);
-}
-
 inline constexpr koro::IOManager::Event operator|(
 	const koro::IOManager::Event& lhs, const koro::IOManager::Event& rhs)
 {
 	return koro::IOManager::Event(static_cast<uint8_t>(lhs) |
 								  static_cast<uint8_t>(rhs));
-}
-
-inline constexpr koro::IOManager::Event operator|(
-	uint8_t lhs, const koro::IOManager::Event& rhs)
-{
-	return koro::IOManager::Event(lhs | static_cast<uint8_t>(rhs));
 }
 
 inline constexpr koro::IOManager::Event operator~(

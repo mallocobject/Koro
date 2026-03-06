@@ -14,6 +14,7 @@
 using namespace koro;
 
 thread_local Scheduler* t_scheduler = nullptr;
+thread_local size_t koro::t_thread_idx = -1;
 
 Scheduler::Scheduler(size_t thread_count)
 	: thread_to_post_index_(0), active_thread_count_(0), stop_(false)
@@ -34,6 +35,7 @@ Scheduler::~Scheduler()
 	{
 		t_scheduler = nullptr;
 	}
+
 	LOG_DEBUG << "destroy scheduler successfully";
 }
 
@@ -70,9 +72,9 @@ void Scheduler::stop()
 		return;
 	}
 
-	for (const auto& datum : data_)
+	for (const auto& data : data_)
 	{
-		datum->cv.notify_one();
+		data->cv.notify_all();
 	}
 
 	std::vector<std::thread> tmp;
@@ -100,48 +102,51 @@ void Scheduler::tickle()
 
 void Scheduler::run(size_t thread_index)
 {
+	t_thread_idx = thread_index;
+
 	uint64_t tid = CurrentThread::tid();
 	LOG_DEBUG << "scheduler runs in thread: " << tid;
 
 	setLocalStance();
 
 	Fiber::curFiberPtr();
+	auto idle_fiber = std::make_shared<Fiber>([this] { this->idle(); });
+
 	Data& data = *data_[thread_index];
 	ScheduledTask task;
-	while (true)
+
+	while (!stopping())
 	{
 		task.clear();
-		// bool need_tickle = false;
+		bool has_task = false;
+
 		{
 			std::unique_lock<std::mutex> lock(data.mtx);
 			if (!data.tasks.empty())
 			{
 				task = std::move(data.tasks.front());
 				data.tasks.pop_front();
+				has_task = true;
 			}
-			else if (!stop_.load(std::memory_order_acquire))
+		}
+
+		if (!has_task)
+		{
+			task = stealTask(thread_index);
+			if (task.fiber || task.cb)
 			{
-				lock.unlock(); // 支持：我偷别人的，别人偷我的
-				task = stealTask(thread_index);
-				if (!task.cb && !task.fiber)
-				{
-					lock.lock();
-					if (!data.tasks.empty() && !stop_)
-					{
-						data.cv.wait(
-							lock,
-							[&data, this] {
-								return stop_.load(std::memory_order_acquire) ||
-									   !data.tasks.empty();
-							});
-					}
-					continue;
-				}
+				has_task = true;
 			}
-			else
+		}
+
+		if (!has_task)
+		{
+			if (idle_fiber->state() != Fiber::State::kTerm)
 			{
-				break;
+				// 进入空闲，执行 idle 协程
+				idle_fiber->resume(); // idle 内部会 yield 回来
 			}
+			continue; // 从 idle 返回后重新检查任务
 		}
 
 		active_thread_count_.fetch_add(1, std::memory_order_acq_rel);
@@ -180,6 +185,36 @@ void Scheduler::run(size_t thread_index)
 
 void Scheduler::idle()
 {
+	Data& data = *data_[t_thread_idx];
+	{
+		std::unique_lock<std::mutex> lock(data.mtx);
+		data.cv.wait(lock,
+					 [&] {
+						 return stop_.load(std::memory_order_acquire) ||
+								!data.tasks.empty();
+					 });
+	}
+
+	Fiber::curFiberPtr()->yield();
+}
+
+bool Scheduler::stopping()
+{
+	if (!stop_.load(std::memory_order_acquire))
+	{
+		return false;
+	}
+
+	for (auto& d : data_)
+	{
+		std::lock_guard<std::mutex> lock(d->mtx);
+		if (!d->tasks.empty())
+		{
+			return false;
+		}
+	}
+
+	return active_thread_count_.load(std::memory_order_acquire) == 0;
 }
 
 Scheduler* Scheduler::localStance()
@@ -203,4 +238,14 @@ Scheduler::ScheduledTask Scheduler::stealTask(size_t thief_id)
 		}
 	}
 	return task;
+}
+
+void Scheduler::wakeupThread(int idx)
+{
+	Data& data = *data_[idx];
+	data.cv.notify_one();
+}
+
+void Scheduler::waitForEvent(int idx)
+{
 }

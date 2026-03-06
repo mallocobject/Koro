@@ -4,7 +4,7 @@ project(Koro_test)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_executable(Koro_test scheduler_test.cpp)
+add_executable(Koro_test iomanager_test2.cpp)
 
 target_link_libraries(Koro_test PRIVATE koro_lib elog_lib)
 
