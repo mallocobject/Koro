@@ -1,10 +1,8 @@
 #include "elog/logger.h"
 #include "koro/scheduler.h"
 #include <atomic>
+#include <chrono>
 #include <cmath>
-#include <cstdint>
-#include <functional>
-#include <vector>
 
 using namespace koro;
 
@@ -22,13 +20,12 @@ void compute(int id, int intensity, double* result)
 
 int main()
 {
-
 	size_t thread_count = 16;
-	Scheduler* s = new Scheduler(thread_count);
+	Scheduler s(thread_count);
 	LOG_INFO << "thread count: " << thread_count;
-	s->init();
+	s.init();
 
-	const int task_count = 1000;  // 任务总数
+	const int task_count = 10000; // 任务总数
 	const int intensity = 100000; // 单个任务的循环次数
 
 	std::vector<double> results(task_count, 0.0);
@@ -37,18 +34,23 @@ int main()
 
 	for (int i = 0; i < task_count; ++i)
 	{
-		s->submit(std::bind(&compute, i, intensity, &results[i]));
+		s.submit(std::bind(&compute, i, intensity, &results[i]));
 	}
 
-	s->stop();
+	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+	for (int i = 0; i < task_count; ++i)
+	{
+		s.submit(std::bind(&compute, i, intensity, &results[i]));
+	}
+
+	s.stop();
 
 	double total_sum = 0;
 	for (auto& r : results)
 	{
 		total_sum += r; // blocking
 	}
-
-	delete s;
 
 	auto end_time = std::chrono::steady_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -59,4 +61,6 @@ int main()
 	LOG_INFO << "  - Checksum:             " << total_sum
 			 << " (Prevention of optimization)";
 	LOG_INFO << "  - Total Tasks:          " << count.load();
+
+	s.stop();
 }
