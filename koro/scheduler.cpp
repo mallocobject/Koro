@@ -4,7 +4,6 @@
 #include "koro/task.h"
 #include <atomic>
 #include <cassert>
-#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -19,41 +18,49 @@ Scheduler::Scheduler(size_t thread_count)
 	assert(thread_count > 0);
 
 	threads_.resize(thread_count);
-	data_.resize(thread_count);
+	task_queues_.resize(thread_count);
 
 	LOG_DEBUG << "creat scheduler successfully";
 }
 
 Scheduler::~Scheduler()
 {
-	assert(stop_.load(std::memory_order_acquire));
+	assert(stop_.load(std::memory_order_relaxed));
 
 	LOG_DEBUG << "destroy scheduler successfully";
 }
 
+void Scheduler::onInit()
+{
+}
+
 void Scheduler::init()
 {
+	static bool initialized = [this]
 	{
-		std::lock_guard<std::mutex> lock(mtx_);
-		stop_.store(false, std::memory_order_release);
-		for (auto& data : data_)
+		stop_.store(false, std::memory_order_relaxed);
+		for (auto& task_queue : task_queues_)
 		{
-			data = std::make_unique<Data>();
+			task_queue = std::make_unique<TaskQueue>();
 		}
+
+		onInit();
 
 		for (size_t i = 0; i < threads_.size(); i++)
 		{
 			threads_[i] = std::jthread(std::bind(&Scheduler::run, this, i));
 		}
-	}
 
-	LOG_DEBUG << "initialize scheduler successfully with " << threads_.size()
-			  << " threads";
+		LOG_DEBUG << "initialize scheduler successfully with "
+				  << threads_.size() << " threads";
+
+		return true;
+	}();
 }
 
 void Scheduler::stop()
 {
-	if (stop_.exchange(true, std::memory_order_acq_rel))
+	if (stop_.exchange(true, std::memory_order_seq_cst))
 	{
 		return;
 	}
@@ -82,21 +89,21 @@ void Scheduler::stop()
 
 bool Scheduler::stopping(size_t skip_idx)
 {
-	if (!stop_.load(std::memory_order_acquire) ||
-		active_thread_count_.load(std::memory_order_acquire) ||
-		pending_event_count_.load(std::memory_order_acquire))
+	if (!stop_.load(std::memory_order_relaxed) ||
+		active_thread_count_.load(std::memory_order_relaxed) ||
+		pending_event_count_.load(std::memory_order_relaxed))
 	{
 		return false;
 	}
 
-	for (size_t i = 0; i < data_.size(); ++i)
+	for (size_t i = 0; i < task_queues_.size(); ++i)
 	{
 		if (i == skip_idx)
 		{
 			continue;
 		}
-		std::lock_guard<std::mutex> lock(data_[i]->mtx);
-		if (!data_[i]->tasks.empty())
+		std::lock_guard<std::mutex> lock(task_queues_[i]->mtx);
+		if (!task_queues_[i]->tasks.empty())
 		{
 			return false;
 		}
@@ -107,28 +114,29 @@ bool Scheduler::stopping(size_t skip_idx)
 
 void Scheduler::tickle(size_t idx)
 {
-	if (data_[idx]->idling.load(std::memory_order_acquire))
+	if (task_queues_[idx]->idling.load(std::memory_order_seq_cst))
 	{
-		data_[idx]->cv.notify_one();
+		task_queues_[idx]->cv.notify_one();
 	}
 }
 
 void Scheduler::idle(size_t idx)
 {
-	Data& data = *data_[idx];
+	TaskQueue& task_queue = *task_queues_[idx];
 	while (true)
 	{
-		data.idling.store(true, std::memory_order_release);
+		if (stopping())
 		{
-			std::unique_lock<std::mutex> lock(data.mtx);
-			// data.cv.wait_for(lock, std::chrono::milliseconds(10));
-			data.cv.wait(lock,
-						 [&] {
-							 return !data.tasks.empty() ||
-									stop_.load(std::memory_order_acquire);
-						 });
+			break;
 		}
-		data.idling.store(false, std::memory_order_release);
+
+		task_queue.idling.store(true, std::memory_order_seq_cst);
+		{
+			std::unique_lock<std::mutex> lock(task_queue.mtx);
+			// task_queue.cv.wait_for(lock, std::chrono::milliseconds(10));
+			task_queue.cv.wait(lock);
+		}
+		task_queue.idling.store(false, std::memory_order_release);
 
 		if (stopping())
 		{
@@ -147,28 +155,30 @@ void Scheduler::run(size_t thread_index)
 	auto idle_fiber = std::make_shared<Fiber>(
 		std::bind(&Scheduler::idle, this, thread_index));
 
-	Data& data = *data_[thread_index];
-	ScheduledTask task;
+	TaskQueue& task_queue = *task_queues_[thread_index];
+	std::shared_ptr<ScheduledTask> task;
 
 	while (true)
 	{
-		task.clear();
 		bool has_task = false;
 
 		{
-			std::unique_lock<std::mutex> lock(data.mtx);
-			if (!data.tasks.empty())
+			std::unique_lock<std::mutex> lock(task_queue.mtx);
+			if (!task_queue.tasks.empty())
 			{
-				task = std::move(data.tasks.front());
-				data.tasks.pop_front();
-				has_task = true;
+				task = task_queue.tasks.front();
+				task_queue.tasks.pop_front();
+				if (task)
+				{
+					has_task = true;
+				}
 			}
 		}
 
 		if (!has_task)
 		{
 			task = stealTask(thread_index);
-			if (task.fiber || task.cb)
+			if (task)
 			{
 				has_task = true;
 			}
@@ -184,47 +194,45 @@ void Scheduler::run(size_t thread_index)
 			break;
 		}
 
-		assert(task.fiber || task.cb);
-		active_thread_count_.fetch_add(1, std::memory_order_release);
+		assert(task);
+		active_thread_count_.fetch_add(1, std::memory_order_relaxed);
 
-		if (task.fiber)
+		if (task->fiber)
 		{
 
-			task.fiber->resume();
-			assert(task.fiber->state() != Fiber::State::kRunning);
+			task->fiber->resume();
+			assert(task->fiber->state() != Fiber::State::kRunning);
 
-			if (task.fiber->state() == Fiber::State::kReady)
+			if (task->fiber->state() == Fiber::State::kReady)
 			{
-				std::lock_guard<std::mutex> q_lock(data.mtx);
-				data.tasks.push_back(std::move(task));
+				std::lock_guard<std::mutex> q_lock(task_queue.mtx);
+				task_queue.tasks.push_back(task);
 			}
 		}
 		else
 		{
-			auto fiber_wrapper = std::make_shared<Fiber>(std::move(task.cb));
+			auto fiber_wrapper = std::make_shared<Fiber>(std::move(task->cb));
 			fiber_wrapper->resume();
 		}
 
-		active_thread_count_.fetch_sub(1, std::memory_order_acquire);
+		active_thread_count_.fetch_sub(1, std::memory_order_relaxed);
 	}
-
-	cv_.notify_all();
 }
 
-ScheduledTask Scheduler::stealTask(size_t thief)
+std::shared_ptr<ScheduledTask> Scheduler::stealTask(size_t thief)
 {
-	ScheduledTask task;
-	for (size_t i = 1; i < data_.size(); i++)
+	std::shared_ptr<ScheduledTask> task;
+	for (size_t i = 1; i < task_queues_.size(); i++)
 	{
-		size_t victim = (thief + i) % data_.size();
-		Data& data = *data_[victim];
-		std::unique_lock<std::mutex> lock(data.mtx, std::try_to_lock);
-		if (lock.owns_lock() && !data.tasks.empty())
+		size_t victim = (thief + i) % task_queues_.size();
+		TaskQueue& task_queue = *task_queues_[victim];
+		std::unique_lock<std::mutex> lock(task_queue.mtx, std::try_to_lock);
+		if (lock.owns_lock() && !task_queue.tasks.empty())
 		{
-			task = std::move(data.tasks.back());
-			data.tasks.pop_back();
+			task = task_queue.tasks.back();
+			task_queue.tasks.pop_back();
 			return task;
 		}
 	}
-	return {};
+	return task;
 }

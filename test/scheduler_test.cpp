@@ -15,7 +15,11 @@ void compute(int id, int intensity, double* result)
 	{
 		*result += std::sin(i * 0.01) * std::cos(id * 0.01) + std::sqrt(i + id);
 	}
-	count.fetch_add(1, std::memory_order_acq_rel);
+	if (id % 1000 == 0)
+	{
+		LOG_INFO << "id: " << id;
+	}
+	count.fetch_add(1, std::memory_order_release);
 }
 
 int main()
@@ -31,13 +35,6 @@ int main()
 	std::vector<double> results(task_count, 0.0);
 
 	auto start_time = std::chrono::steady_clock::now();
-
-	for (int i = 0; i < task_count; ++i)
-	{
-		s.submit(std::bind(&compute, i, intensity, &results[i]));
-	}
-
-	std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
 	for (int i = 0; i < task_count; ++i)
 	{

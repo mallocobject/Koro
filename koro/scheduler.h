@@ -4,9 +4,7 @@
 #include "koro/noncopyable.h"
 #include "koro/task.h"
 #include <atomic>
-#include <condition_variable>
 #include <cstddef>
-#include <deque>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -16,33 +14,19 @@
 #include <vector>
 namespace koro
 {
+class Channel;
 class Fiber;
 class Scheduler : public noncopyable
 {
 	using function = std::function<void()>;
 
-  private:
-	struct Data
-	{
-		std::deque<ScheduledTask> tasks;
-		std::mutex mtx;
-		std::condition_variable cv;
-		std::atomic<bool> idling{false};
-	};
-
-  private:
-	std::vector<std::unique_ptr<Data>> data_;
-	std::vector<std::jthread> threads_;
-
-	std::atomic<size_t> active_thread_count_{0};
-	std::atomic<size_t> thread_to_post_index_{0};
-
-	std::mutex mtx_;
-	std::condition_variable cv_;
-	std::atomic<size_t> pending_event_count_{0};
-
   protected:
 	std::atomic<bool> stop_{true};
+	std::atomic<size_t> pending_event_count_{0};
+	std::vector<std::unique_ptr<TaskQueue>> task_queues_;
+	std::vector<std::jthread> threads_;
+	std::atomic<size_t> active_thread_count_{0};
+	std::atomic<size_t> thread_to_post_index_{0};
 
   public:
 	explicit Scheduler(size_t thread_count = 1);
@@ -58,18 +42,20 @@ class Scheduler : public noncopyable
 				 void submit(CF&& cf);
 
   protected:
+	virtual void onInit();
+
 	void run(size_t thread_index);
 
 	// 默认实现：cv.wait_for
 	// IOManager实现：epoll_wait（最近定时器时间）
-	virtual void idle(size_t idz);
+	virtual void idle(size_t idx);
 
 	virtual bool stopping(size_t skip_idx = std::numeric_limits<size_t>::max());
 
 	// 通知线程唤醒 (tickle)
 	virtual void tickle(size_t idx);
 
-	ScheduledTask stealTask(size_t thief);
+	std::shared_ptr<ScheduledTask> stealTask(size_t thief);
 };
 
 template <typename CF>
@@ -83,14 +69,14 @@ template <typename CF>
 	// xxx algorithm
 	size_t idx = thread_to_post_index_.fetch_add(1, std::memory_order_acq_rel) %
 				 threads_.size();
-	Data& data = *data_[idx];
+	TaskQueue& task_queue = *task_queues_[idx];
 	{
-		std::lock_guard<std::mutex> lock(data.mtx);
-		need_tickle = data.tasks.empty();
-		ScheduledTask task(std::forward<CF>(cf));
-		if (task.fiber || task.cb)
+		std::lock_guard<std::mutex> lock(task_queue.mtx);
+		need_tickle = task_queue.tasks.empty();
+		auto task = std::make_shared<ScheduledTask>(std::forward<CF>(cf));
+		if (task)
 		{
-			data.tasks.push_back(std::move(task));
+			task_queue.tasks.push_back(task);
 		}
 	}
 

@@ -1,14 +1,20 @@
 #ifndef KORO_TASK_H
 #define KORO_TASK_H
 
+#include <condition_variable>
+#include <deque>
 #include <functional>
 #include <memory>
+#include <unordered_map>
 namespace koro
 {
 class Fiber;
+class EpollPoller;
+class Channel;
 struct ScheduledTask
 {
 	using function = std::function<void()>;
+
 	std::shared_ptr<Fiber> fiber;
 	function cb;
 
@@ -62,6 +68,22 @@ struct ScheduledTask
 		fiber = nullptr;
 		cb = nullptr;
 	}
+
+	explicit operator bool() const noexcept
+	{
+		return fiber || cb;
+	}
+};
+
+struct TaskQueue
+{
+	std::deque<std::shared_ptr<ScheduledTask>> tasks;
+	std::mutex mtx;
+	std::condition_variable cv;
+	std::atomic<bool> idling{false};
+	std::unordered_map<int, std::shared_ptr<Channel>> chs_;
+	std::shared_ptr<EpollPoller> epoller_;
+	std::shared_ptr<Channel> wakeup_ch_;
 };
 } // namespace koro
 

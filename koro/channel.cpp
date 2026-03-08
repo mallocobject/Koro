@@ -1,0 +1,74 @@
+#include "koro/channel.h"
+#include "elog/logger.h"
+#include "koro/epoll_poller.h"
+#include "koro/file_descriptor.h"
+#include "koro/task.h"
+#include <cassert>
+#include <memory>
+#include <mutex>
+#include <unistd.h>
+#include <utility>
+
+using namespace koro;
+
+Channel::Channel(int fd, TaskQueue* task_queue)
+	: fd_(fd), task_queue_(task_queue)
+{
+}
+
+Channel::~Channel()
+{
+	FD::close(fd_);
+}
+
+void Channel::remove()
+{
+	assert(task_queue_ && task_queue_->epoller_);
+	task_queue_->epoller_->removeChannel(this);
+}
+
+void Channel::update()
+{
+	assert(task_queue_ && task_queue_->epoller_);
+	task_queue_->epoller_->updateChannel(this);
+}
+
+void Channel::handleEvent()
+{
+	if (revents_ & EPOLLERR)
+	{
+		triggerEvent(EPOLLERR);
+	}
+	if (revents_ & EPOLLIN)
+	{
+		triggerEvent(EPOLLIN);
+	}
+	if (revents_ & EPOLLOUT)
+	{
+		triggerEvent(EPOLLOUT);
+	}
+}
+
+void Channel::triggerEvent(uint32_t e)
+{
+	std::shared_ptr<ScheduledTask> cb;
+	switch (e)
+	{
+	case EPOLLIN:
+		cb = read_callback_;
+		break;
+	case EPOLLOUT:
+		cb = write_callback_;
+		break;
+	case EPOLLERR:
+		cb = error_callback_;
+		break;
+	default:
+		LOG_ERROR << "unsupported event triggers: " << e;
+		return;
+	}
+	if (cb && *cb)
+	{
+		task_queue_->tasks.push_back(std::move(cb));
+	}
+}
