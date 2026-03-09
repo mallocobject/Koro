@@ -28,7 +28,7 @@ class IOManager : public Scheduler
 	void removeChannel(Channel* ch);
 
 	void unregisterEvent(Channel* ch, Event e);
-	void unregisterEventAfterDone(Channel* ch, Event e);
+	// void unregisterEventAfterDone(Channel* ch, Event e); // deprecate
 
   protected:
 	void onInit() override;

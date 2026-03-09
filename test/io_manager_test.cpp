@@ -14,7 +14,7 @@ int main()
 	auto iom = std::make_unique<IOManager>(16);
 	iom->init();
 
-	const int numEvents = 1000;
+	const int numEvents = 100000;
 	std::atomic<int> eventsHandled{0};
 	std::vector<int> readFds(numEvents);
 	std::vector<int> writeFds(numEvents);
@@ -40,11 +40,10 @@ int main()
 				if (n > 0)
 				{
 					buf[n] = '\0';
-					LOG_INFO << "Read from pipe " << i << ": " << buf;
+					LOG_FATAL << "Read from pipe " << i << ": " << buf;
 				}
 				// 取消读事件，避免重复触发
-				iom->unregisterEventAfterDone(channels[i],
-											  IOManager::Event::kRead);
+				iom->unregisterEvent(channels[i], IOManager::Event::kRead);
 				++eventsHandled;
 			});
 
@@ -59,10 +58,10 @@ int main()
 		::write(writeFds[i], msg.c_str(), msg.size());
 	}
 
-	LOG_INFO << "All events handled, stopping IOManager...";
-	iom->stop(); // 应该能正常退出，不会卡死
+	iom->stop();
 
 	assert(eventsHandled.load() == numEvents);
+	LOG_INFO << "events handled count: " << eventsHandled.load();
 
 	// 关闭文件描述符
 	for (int i = 0; i < numEvents; ++i)

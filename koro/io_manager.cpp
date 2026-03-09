@@ -110,31 +110,31 @@ void IOManager::unregisterEvent(Channel* ch, Event e)
 	}
 }
 
-void IOManager::unregisterEventAfterDone(Channel* ch, Event e)
-{
-	int fd = ch->fd();
-	TaskQueue& task_queue = *ch->taskQueue();
-	std::lock_guard<std::mutex> lock(task_queue.mtx);
-	auto it = task_queue.chs_.find(fd);
-	if (it != task_queue.chs_.end())
-	{
-		assert(it->second.get() == ch);
+// void IOManager::unregisterEventAfterDone(Channel* ch, Event e)
+// {
+// 	int fd = ch->fd();
+// 	TaskQueue& task_queue = *ch->taskQueue();
+// 	std::lock_guard<std::mutex> lock(task_queue.mtx);
+// 	auto it = task_queue.chs_.find(fd);
+// 	if (it != task_queue.chs_.end())
+// 	{
+// 		assert(it->second.get() == ch);
 
-		uint32_t event = static_cast<uint32_t>(e);
-		if (event & 0x001)
-		{
-			ch->disableReading();
-			ch->triggerEvent(0x001);
-			pending_event_count_.fetch_sub(1, std::memory_order_release);
-		}
-		if (event & 0x004)
-		{
-			ch->disableWriting();
-			ch->triggerEvent(0x004);
-			pending_event_count_.fetch_sub(1, std::memory_order_release);
-		}
-	}
-}
+// 		uint32_t event = static_cast<uint32_t>(e);
+// 		if (event & 0x001)
+// 		{
+// 			ch->disableReading();
+// 			ch->triggerEvent(0x001);
+// 			pending_event_count_.fetch_sub(1, std::memory_order_release);
+// 		}
+// 		if (event & 0x004)
+// 		{
+// 			ch->disableWriting();
+// 			ch->triggerEvent(0x004);
+// 			pending_event_count_.fetch_sub(1, std::memory_order_release);
+// 		}
+// 	}
+// }
 
 void IOManager::onInit()
 {
@@ -154,44 +154,44 @@ void IOManager::idle(size_t idx)
 	std::vector<Channel*> active_chs;
 	while (true)
 	{
-
-		if (stopping())
-		{
-			break;
-		}
-
 		active_chs.clear();
 
 		task_queue.idling.store(true, std::memory_order_seq_cst);
-		static const int kMaxTimeoutMs = 500;
+		static const int kMaxTimeoutMs = -1;
+		LOG_DEBUG << "epoll: " << idx << " enter waiting state";
 		task_queue.epoller_->poll(&active_chs, kMaxTimeoutMs);
+		LOG_DEBUG << "epoll: " << idx << " out of waiting state";
+		task_queue.idling.store(false, std::memory_order_release);
 
-		for (auto& ch : active_chs)
 		{
-			std::lock_guard<std::mutex> lock(task_queue.mtx);
-			if (ch == task_queue.wakeup_ch_.get())
+			for (auto& ch : active_chs)
 			{
-				uint64_t one = 1;
-				ssize_t n = ::read(ch->fd(), &one, sizeof(one));
 
-				if (n != sizeof(one))
+				if (ch == task_queue.wakeup_ch_.get())
 				{
-					LOG_ERROR << "wakeup_fd reads " << n
-							  << " bytes instead of 8";
+					uint64_t one = 1;
+					ssize_t n = ::read(ch->fd(), &one, sizeof(one));
+
+					if (n != sizeof(one))
+					{
+						LOG_ERROR << "wakeup_fd reads " << n
+								  << " bytes instead of 8";
+					}
 				}
-			}
-			else
-			{
-				ch->handleEvent();
+				else
+				{
+					std::lock_guard<std::mutex> lock(task_queue.mtx);
+					ch->handleEvent();
+				}
 			}
 		}
 
 		if (stopping())
 		{
+			LOG_WARN << "thread: " << idx << " quit";
 			break;
 		}
 
-		task_queue.idling.store(false, std::memory_order_release);
 		Fiber::runningFiber()->yield();
 	}
 }
@@ -200,9 +200,8 @@ void IOManager::tickle(size_t idx)
 {
 	uint64_t one = 1;
 	TaskQueue& task_queue = *task_queues_[idx];
-	if (task_queue.idling.load(std::memory_order_seq_cst))
+	if (task_queue.idling.load(std::memory_order_acquire))
 	{
-		std::lock_guard<std::mutex> lock(task_queue.mtx);
 		ssize_t n = ::write(task_queue.wakeup_ch_->fd(), &one,
 							sizeof(one)); // 唤醒 epoll_wait
 

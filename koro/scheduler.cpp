@@ -65,19 +65,21 @@ void Scheduler::stop()
 		return;
 	}
 
+	do
+	{
+		for (size_t i = 0; i < threads_.size(); ++i)
+		{
+			tickle(i);
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	} while (!stopping());
+
 	for (size_t i = 0; i < threads_.size(); ++i)
 	{
 		tickle(i);
 	}
 
-	// while (!stopping())
-	// {
-	// 	std::this_thread::sleep_for(std::chrono::milliseconds(100));
-	// 	for (size_t i = 0; i < threads_.size(); ++i)
-	// 	{
-	// 		tickle(i);
-	// 	}
-	// }
+	LOG_DEBUG << "start wait threads join";
 
 	for (auto& thread : threads_)
 	{
@@ -125,11 +127,6 @@ void Scheduler::idle(size_t idx)
 	TaskQueue& task_queue = *task_queues_[idx];
 	while (true)
 	{
-		if (stopping())
-		{
-			break;
-		}
-
 		task_queue.idling.store(true, std::memory_order_seq_cst);
 		{
 			std::unique_lock<std::mutex> lock(task_queue.mtx);

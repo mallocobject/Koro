@@ -5,7 +5,6 @@
 #include "koro/task.h"
 #include <cassert>
 #include <memory>
-#include <mutex>
 #include <unistd.h>
 #include <utility>
 
