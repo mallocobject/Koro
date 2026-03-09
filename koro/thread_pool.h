@@ -42,7 +42,7 @@ class ThreadPool : public noncopyable
 
 		// fetch_add return old val
 		// xxx algorithm
-		auto& data = *data_[cur_id.fetch_add(1, std::memory_order_acq_rel) %
+		auto& data = *data_[cur_id.fetch_add(1, std::memory_order_relaxed) %
 							workers_.size()];
 		{
 			std::lock_guard<std::mutex> lock(data.mtx);

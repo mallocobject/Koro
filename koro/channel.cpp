@@ -24,6 +24,7 @@ void Channel::remove()
 {
 	assert(task_queue_ && task_queue_->epoller_);
 	task_queue_->epoller_->removeChannel(this);
+	task_queue_ = nullptr;
 }
 
 void Channel::update()

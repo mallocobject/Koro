@@ -91,9 +91,9 @@ void Scheduler::stop()
 
 bool Scheduler::stopping(size_t skip_idx)
 {
-	if (!stop_.load(std::memory_order_relaxed) ||
-		active_thread_count_.load(std::memory_order_relaxed) ||
-		pending_event_count_.load(std::memory_order_relaxed))
+	if (!stop_.load(std::memory_order_acquire) ||
+		active_thread_count_.load(std::memory_order_acquire) ||
+		pending_event_count_.load(std::memory_order_acquire))
 	{
 		return false;
 	}
@@ -192,7 +192,7 @@ void Scheduler::run(size_t thread_index)
 		}
 
 		assert(task);
-		active_thread_count_.fetch_add(1, std::memory_order_relaxed);
+		active_thread_count_.fetch_add(1, std::memory_order_acquire);
 
 		if (task->fiber)
 		{
@@ -212,7 +212,7 @@ void Scheduler::run(size_t thread_index)
 			fiber_wrapper->resume();
 		}
 
-		active_thread_count_.fetch_sub(1, std::memory_order_relaxed);
+		active_thread_count_.fetch_sub(1, std::memory_order_release);
 	}
 }
 

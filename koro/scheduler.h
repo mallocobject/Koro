@@ -67,7 +67,7 @@ template <typename CF>
 
 	// fetch_add return old val
 	// xxx algorithm
-	size_t idx = thread_to_post_index_.fetch_add(1, std::memory_order_acq_rel) %
+	size_t idx = thread_to_post_index_.fetch_add(1, std::memory_order_relaxed) %
 				 threads_.size();
 	TaskQueue& task_queue = *task_queues_[idx];
 	{

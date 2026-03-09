@@ -4,6 +4,7 @@
 #include "koro/scheduler.h"
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 namespace koro
 {
 class Channel;
@@ -23,11 +24,13 @@ class IOManager : public Scheduler
 	explicit IOManager(size_t thread_count = 1);
 	~IOManager();
 
-	Channel* registerEvent(int fd, Event e, std::shared_ptr<ScheduledTask> cb,
-						   bool useET = false);
-	void removeChannel(Channel* ch);
+	std::shared_ptr<Channel> bindTaskQueue(int fd);
 
-	void unregisterEvent(Channel* ch, Event e);
+	bool registerEvent(std::shared_ptr<Channel> ch, Event e,
+					   std::shared_ptr<ScheduledTask> cb, bool useET = false);
+	void removeChannel(std::shared_ptr<Channel> ch);
+
+	void unregisterEvent(std::shared_ptr<Channel> ch, Event e);
 	// void unregisterEventAfterDone(Channel* ch, Event e); // deprecate
 
   protected:
