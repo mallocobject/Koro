@@ -25,7 +25,7 @@ int main()
 
 		auto task1 = [readFd = readFds[i], i, &eventsHandled]
 		{
-			char buf[32];
+			char buf[1024];
 			int n = read(readFd, buf, sizeof(buf));
 			if (n > 0)
 			{
