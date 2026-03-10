@@ -1,12 +1,12 @@
 <div align="center">
-<pre>
-██╗  ██╗ ██████╗ ██████╗ ██████╗ 
+  <pre>
+██╗  ██╗ ██████╗ ██████╗  ██████╗ 
 ██║ ██╔╝██╔═══██╗██╔══██╗██╔═══██╗
 █████╔╝ ██║   ██║██████╔╝██║   ██║
 ██╔═██╗ ██║   ██║██╔══██╗██║   ██║
 ██║  ██╗╚██████╔╝██║  ██║╚██████╔╝
 ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝
-</pre>
+  </pre>
 <p align="center">
 <img src="https://img.shields.io/badge/C%2B%2B-20-blue.svg" alt="C++20">
 <img src="https://img.shields.io/badge/platform-Linux-red.svg" alt="Platform">
