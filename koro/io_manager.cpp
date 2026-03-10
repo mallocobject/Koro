@@ -13,30 +13,44 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
-
 using namespace koro;
 
 IOManager::IOManager(size_t thread_count) : Scheduler(thread_count)
 {
+	init();
 }
 
 IOManager::~IOManager()
 {
+	stop();
 }
 
 std::shared_ptr<Channel> IOManager::bindTaskQueue(int fd)
 {
-	size_t idx = thread_to_post_index_.fetch_add(1, std::memory_order_relaxed) %
-				 threads_.size();
-	TaskQueue& task_queue = *task_queues_[idx];
-	return std::make_shared<Channel>(fd, &task_queue);
+	auto task_queue = t_task_queue;
+	std::shared_ptr<koro::Channel> ch;
+	{
+		std::lock_guard<std::mutex> lock(task_queue->mtx);
+		if (auto it = task_queue->chs_.find(fd); it != task_queue->chs_.end())
+		{
+			ch = it->second;
+		}
+		else
+		{
+			ch = std::make_shared<koro::Channel>(fd, task_queue);
+			task_queue->chs_[fd] = ch;
+		}
+	}
+	return ch;
 }
 
 bool IOManager::registerEvent(std::shared_ptr<Channel> ch, Event e,
-							  std::shared_ptr<ScheduledTask> cb, bool useET)
+							  std::shared_ptr<ScheduledTask> cb, bool useET,
+							  int timeout)
 {
 	assert(ch->taskQueue());
 	uint32_t event = static_cast<uint32_t>(e);
@@ -48,7 +62,7 @@ bool IOManager::registerEvent(std::shared_ptr<Channel> ch, Event e,
 		}
 		else if (event == 0x004)
 		{
-			ch->setWriteCallbakc(std::move(cb));
+			ch->setWriteCallback(std::move(cb));
 		}
 		else
 		{
@@ -111,12 +125,14 @@ void IOManager::unregisterEvent(std::shared_ptr<Channel> ch, Event e)
 		{
 			// ch->disableReading();
 			ch->setEvents(event & ~0x001);
+			ch->setReadCallback(nullptr);
 			ban_event_count++;
 		}
 		if (event & 0x004)
 		{
 			// ch->disableWriting();
 			ch->setEvents(event & ~0x004);
+			ch->setWriteCallback(nullptr);
 			ban_event_count++;
 		}
 
@@ -180,9 +196,9 @@ void IOManager::idle(size_t idx)
 		}
 
 		static const int kMaxTimeoutMs = -1;
-		LOG_DEBUG << "epoll: " << idx << " enter waiting state";
+		LOG_TRACE << "epoll: " << idx << " enter waiting state";
 		task_queue.epoller_->poll(&active_chs, kMaxTimeoutMs);
-		LOG_DEBUG << "epoll: " << idx << " out of waiting state";
+		LOG_TRACE << "epoll: " << idx << " out of waiting state";
 		task_queue.idling.store(false, std::memory_order_release);
 
 		{
@@ -192,7 +208,8 @@ void IOManager::idle(size_t idx)
 				if (ch == task_queue.wakeup_ch_.get())
 				{
 					uint64_t one = 1;
-					ssize_t n = ::read(ch->fd(), &one, sizeof(one));
+					// ssize_t n = ::read(ch->fd(), &one, sizeof(one));
+					ssize_t n = syscall(SYS_read, ch->fd(), &one, sizeof(one));
 
 					if (n != sizeof(one))
 					{
@@ -224,8 +241,10 @@ void IOManager::tickle(size_t idx)
 	TaskQueue& task_queue = *task_queues_[idx];
 	if (task_queue.idling.load(std::memory_order_seq_cst))
 	{
-		ssize_t n = ::write(task_queue.wakeup_ch_->fd(), &one,
-							sizeof(one)); // 唤醒 epoll_wait
+		// ssize_t n = ::write(task_queue.wakeup_ch_->fd(), &one,
+		// 					sizeof(one)); // 唤醒 epoll_wait
+		ssize_t n =
+			syscall(SYS_write, task_queue.wakeup_ch_->fd(), &one, sizeof(one));
 
 		if (n != sizeof(one))
 		{

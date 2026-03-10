@@ -7,11 +7,14 @@
 #include <ucontext.h>
 #include <utility>
 
-using namespace koro;
-
+namespace koro
+{
 thread_local Fiber* t_fiber = nullptr;				   // temporary
 thread_local std::shared_ptr<Fiber> t_scheduler_fiber; // prolong object life
-thread_local Fiber* t_thread_fiber = nullptr;		   // safe
+thread_local Fiber* t_thread_fiber = nullptr;		   // safe and extern
+} // namespace koro
+
+using namespace koro;
 
 // for scheduled fiber
 Fiber::Fiber() : state_(State::kRunning), run_in_scheduler_(false)
@@ -87,7 +90,7 @@ void Fiber::resetFunc(function cb)
 
 void Fiber::resume()
 {
-	assert(state_ == State::kReady);
+	assert(state_ == State::kReady || state_ == State::kHold);
 	state_ = State::kRunning;
 
 	setRunningFiber(this);
@@ -109,6 +112,30 @@ void Fiber::resume()
 	}
 }
 
+void Fiber::hold()
+{
+	assert(state_ == State::kRunning);
+	state_ = State::kHold;
+
+	if (run_in_scheduler_)
+	{
+		setRunningFiber(t_scheduler_fiber.get());
+		if (::swapcontext(&ctx_, &t_scheduler_fiber->ctx_))
+		{
+			LOG_FATAL << "hold <t_scheduled_fiber> failed";
+			::exit(EXIT_FAILURE);
+		}
+	}
+	else
+	{
+		setRunningFiber(t_thread_fiber);
+		if (::swapcontext(&ctx_, &t_thread_fiber->ctx_))
+		{
+			LOG_FATAL << "hold <t_thread_fiber> failed";
+			::exit(EXIT_FAILURE);
+		}
+	}
+}
 void Fiber::yield()
 {
 	assert(state_ == State::kRunning || state_ == State::kTerm);

@@ -63,30 +63,33 @@ inline void close(int& fd)
 	}
 }
 
-inline void setNonBlocking(int fd, bool on = true)
+inline bool setNonBlocking(int fd, bool on = true)
 {
 	int flags = ::fcntl(fd, F_GETFL, 0);
 	if (flags == -1)
 	{
+		int err = errno;
 		LOG_ERROR << "fcntl(F_GETFL) failed for fd " << fd << ": "
-				  << ::strerror(errno);
-		return;
+				  << ::strerror(err);
+		return false;
 	}
 
-	if (on)
+	int new_flags = on ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK);
+
+	if (new_flags == flags)
 	{
-		flags |= O_NONBLOCK;
-	}
-	else
-	{
-		flags &= ~O_NONBLOCK;
+		return true;
 	}
 
-	if (::fcntl(fd, F_SETFL, flags) == -1)
+	if (::fcntl(fd, F_SETFL, new_flags) == -1)
 	{
+		int err = errno;
 		LOG_ERROR << "fcntl(F_SETFL) failed for fd " << fd << ": "
-				  << ::strerror(errno);
+				  << ::strerror(err);
+		return false;
 	}
+
+	return true;
 }
 } // namespace FD
 } // namespace koro

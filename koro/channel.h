@@ -25,6 +25,10 @@ class Channel : public noncopyable
 	std::shared_ptr<ScheduledTask> write_callback_;
 	std::shared_ptr<ScheduledTask> error_callback_;
 
+  protected:
+	bool user_non_block_{false};
+	bool sys_non_block_{false};
+
   public:
 	Channel(int fd, TaskQueue* task_queue);
 	~Channel();
@@ -111,7 +115,7 @@ class Channel : public noncopyable
 		read_callback_ = std::move(cb);
 	}
 
-	void setWriteCallbakc(std::shared_ptr<ScheduledTask> cb)
+	void setWriteCallback(std::shared_ptr<ScheduledTask> cb)
 	{
 		write_callback_ = std::move(cb);
 	}

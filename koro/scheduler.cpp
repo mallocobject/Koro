@@ -11,6 +11,11 @@
 #include <thread>
 #include <utility>
 
+namespace koro
+{
+thread_local TaskQueue* t_task_queue = nullptr;
+}
+
 using namespace koro;
 
 Scheduler::Scheduler(size_t thread_count)
@@ -20,14 +25,14 @@ Scheduler::Scheduler(size_t thread_count)
 	threads_.resize(thread_count);
 	task_queues_.resize(thread_count);
 
-	LOG_DEBUG << "creat scheduler successfully";
+	LOG_TRACE << "creat scheduler successfully";
 }
 
 Scheduler::~Scheduler()
 {
 	assert(stop_.load(std::memory_order_relaxed));
 
-	LOG_DEBUG << "destroy scheduler successfully";
+	LOG_TRACE << "destroy scheduler successfully";
 }
 
 void Scheduler::onInit()
@@ -79,14 +84,14 @@ void Scheduler::stop()
 		tickle(i);
 	}
 
-	LOG_DEBUG << "start wait threads join";
+	LOG_TRACE << "start wait threads join";
 
 	for (auto& thread : threads_)
 	{
 		thread.join();
 	}
 
-	LOG_DEBUG << "scheduler ends";
+	LOG_TRACE << "scheduler ends";
 }
 
 bool Scheduler::stopping(size_t skip_idx)
@@ -152,7 +157,7 @@ void Scheduler::run(size_t thread_index)
 	auto idle_fiber = std::make_shared<Fiber>(
 		std::bind(&Scheduler::idle, this, thread_index));
 
-	TaskQueue& task_queue = *task_queues_[thread_index];
+	t_task_queue = task_queues_[thread_index].get();
 	std::shared_ptr<ScheduledTask> task;
 
 	while (true)
@@ -160,11 +165,11 @@ void Scheduler::run(size_t thread_index)
 		bool has_task = false;
 
 		{
-			std::unique_lock<std::mutex> lock(task_queue.mtx);
-			if (!task_queue.tasks.empty())
+			std::unique_lock<std::mutex> lock(t_task_queue->mtx);
+			if (!t_task_queue->tasks.empty())
 			{
-				task = task_queue.tasks.front();
-				task_queue.tasks.pop_front();
+				task = t_task_queue->tasks.front();
+				t_task_queue->tasks.pop_front();
 				if (task)
 				{
 					has_task = true;
@@ -202,8 +207,8 @@ void Scheduler::run(size_t thread_index)
 
 			if (task->fiber->state() == Fiber::State::kReady)
 			{
-				std::lock_guard<std::mutex> q_lock(task_queue.mtx);
-				task_queue.tasks.push_back(task);
+				std::lock_guard<std::mutex> q_lock(t_task_queue->mtx);
+				t_task_queue->tasks.push_back(task);
 			}
 		}
 		else

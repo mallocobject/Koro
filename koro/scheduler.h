@@ -14,6 +14,8 @@
 #include <vector>
 namespace koro
 {
+extern thread_local TaskQueue* t_task_queue;
+
 class Channel;
 class Fiber;
 class Scheduler : public noncopyable

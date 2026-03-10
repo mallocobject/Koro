@@ -27,7 +27,8 @@ class IOManager : public Scheduler
 	std::shared_ptr<Channel> bindTaskQueue(int fd);
 
 	bool registerEvent(std::shared_ptr<Channel> ch, Event e,
-					   std::shared_ptr<ScheduledTask> cb, bool useET = false);
+					   std::shared_ptr<ScheduledTask> cb, bool useET = false,
+					   int timeout = -1);
 	void removeChannel(std::shared_ptr<Channel> ch);
 
 	void unregisterEvent(std::shared_ptr<Channel> ch, Event e);

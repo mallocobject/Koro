@@ -8,8 +8,10 @@
 #include <sys/ucontext.h>
 namespace koro
 {
-// resume 只能在外部使用
-// yield 只能在内部使用（在回调中使用）
+class Fiber;
+extern thread_local Fiber* t_thread_fiber;
+// resume 由调度协程自动调用
+// yield/hold 由任务协程主动调动
 class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 {
 	using function = std::function<void()>;
@@ -19,6 +21,7 @@ class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 	{
 		kReady,
 		kRunning,
+		kHold,
 		kTerm
 	};
 
@@ -38,7 +41,9 @@ class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 
 	void resetFunc(function cb);
 	void resume(); // scheduler -> this
+	void hold();   // yield duo to waiting event
 	void yield();  // this -> scheduler
+
 	State state() const
 	{
 		return state_;
