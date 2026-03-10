@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
+
 using namespace koro;
 
 IOManager::IOManager(size_t thread_count) : Scheduler(thread_count)
@@ -26,25 +27,34 @@ IOManager::IOManager(size_t thread_count) : Scheduler(thread_count)
 
 IOManager::~IOManager()
 {
-	stop();
 }
 
 std::shared_ptr<Channel> IOManager::bindTaskQueue(int fd)
 {
-	auto task_queue = t_task_queue;
-	std::shared_ptr<koro::Channel> ch;
+	std::lock_guard<std::mutex> lock(g_ch_table->mtx);
+	while (fd >= g_ch_table->chs.size())
 	{
-		std::lock_guard<std::mutex> lock(task_queue->mtx);
-		if (auto it = task_queue->chs_.find(fd); it != task_queue->chs_.end())
+		g_ch_table->chs.resize(fd * 1.5);
+	}
+
+	std::shared_ptr<Channel> ch = g_ch_table->chs[fd];
+	if (!ch)
+	{
+		if (!t_task_queue)
 		{
-			ch = it->second;
+			size_t idx =
+				thread_to_post_index_.fetch_add(1, std::memory_order_relaxed) %
+				threads_.size();
+			ch = std::make_shared<Channel>(fd, task_queues_[idx].get());
 		}
 		else
 		{
-			ch = std::make_shared<koro::Channel>(fd, task_queue);
-			task_queue->chs_[fd] = ch;
+			ch = std::make_shared<Channel>(fd, t_task_queue);
 		}
+
+		g_ch_table->chs[fd] = ch;
 	}
+
 	return ch;
 }
 
@@ -55,7 +65,7 @@ bool IOManager::registerEvent(std::shared_ptr<Channel> ch, Event e,
 	assert(ch->taskQueue());
 	uint32_t event = static_cast<uint32_t>(e);
 	{
-		std::lock_guard<std::mutex> lock(ch->taskQueue()->mtx);
+		std::lock_guard<std::mutex> lock(ch->mtx_);
 		if (event == 0x001)
 		{
 			ch->setReadCallback(std::move(cb));
@@ -95,14 +105,12 @@ void IOManager::removeChannel(std::shared_ptr<Channel> ch)
 	}
 
 	int fd = ch->fd();
-	TaskQueue& task_queue = *ch->taskQueue();
 
 	{
-		std::lock_guard<std::mutex> lock(task_queue.mtx);
-		if (auto it = task_queue.chs_.find(fd); it != task_queue.chs_.end())
+		std::lock_guard<std::mutex> lock(g_ch_table->mtx);
+		if (fd < g_ch_table->chs.size() && g_ch_table->chs[fd])
 		{
-			assert(it->first == fd && it->second == ch);
-			task_queue.chs_.erase(it);
+			g_ch_table->chs[fd].reset();
 		}
 	}
 
@@ -116,11 +124,10 @@ void IOManager::unregisterEvent(std::shared_ptr<Channel> ch, Event e)
 	assert(ch->taskQueue());
 	uint32_t event = static_cast<uint32_t>(e);
 
-	TaskQueue& task_queue = *ch->taskQueue();
 	size_t ban_event_count = 0;
 
 	{
-		std::lock_guard<std::mutex> lock(task_queue.mtx);
+		std::lock_guard<std::mutex> lock(ch->mtx_);
 		if (event & 0x001)
 		{
 			// ch->disableReading();
@@ -141,32 +148,6 @@ void IOManager::unregisterEvent(std::shared_ptr<Channel> ch, Event e)
 
 	pending_event_count_.fetch_sub(ban_event_count, std::memory_order_release);
 }
-
-// void IOManager::unregisterEventAfterDone(Channel* ch, Event e)
-// {
-// 	int fd = ch->fd();
-// 	TaskQueue& task_queue = *ch->taskQueue();
-// 	std::lock_guard<std::mutex> lock(task_queue.mtx);
-// 	auto it = task_queue.chs_.find(fd);
-// 	if (it != task_queue.chs_.end())
-// 	{
-// 		assert(it->second.get() == ch);
-
-// 		uint32_t event = static_cast<uint32_t>(e);
-// 		if (event & 0x001)
-// 		{
-// 			ch->disableReading();
-// 			ch->triggerEvent(0x001);
-// 			pending_event_count_.fetch_sub(1, std::memory_order_release);
-// 		}
-// 		if (event & 0x004)
-// 		{
-// 			ch->disableWriting();
-// 			ch->triggerEvent(0x004);
-// 			pending_event_count_.fetch_sub(1, std::memory_order_release);
-// 		}
-// 	}
-// }
 
 void IOManager::onInit()
 {
@@ -219,7 +200,6 @@ void IOManager::idle(size_t idx)
 				}
 				else
 				{
-					std::lock_guard<std::mutex> lock(task_queue.mtx);
 					ch->handleEvent();
 				}
 			}

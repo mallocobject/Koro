@@ -2,18 +2,20 @@
 #define KORO_CHANNEL_H
 
 #include "koro/noncopyable.h"
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <sys/epoll.h>
 #include <utility>
+#include <vector>
 namespace koro
 {
 class ScheduledTask;
 class TaskQueue;
 class Channel : public noncopyable
 {
-
   private:
 	int fd_{-1};
 	TaskQueue* task_queue_{nullptr};
@@ -25,9 +27,12 @@ class Channel : public noncopyable
 	std::shared_ptr<ScheduledTask> write_callback_;
 	std::shared_ptr<ScheduledTask> error_callback_;
 
-  protected:
-	bool user_non_block_{false};
-	bool sys_non_block_{false};
+  public:
+	std::atomic<bool> user_non_block_{false};
+	std::atomic<bool> sys_non_block_{false};
+
+  public:
+	std::mutex mtx_;
 
   public:
 	Channel(int fd, TaskQueue* task_queue);
@@ -131,6 +136,14 @@ class Channel : public noncopyable
 
 	void triggerEvent(uint32_t e);
 };
+
+struct ChannelTable : public noncopyable
+{
+	std::mutex mtx;
+	std::vector<std::shared_ptr<Channel>> chs;
+};
+
+extern std::unique_ptr<ChannelTable> g_ch_table;
 } // namespace koro
 
 #endif

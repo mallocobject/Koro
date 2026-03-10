@@ -52,23 +52,27 @@ void Channel::handleEvent()
 void Channel::triggerEvent(uint32_t e)
 {
 	std::shared_ptr<ScheduledTask> cb;
-	switch (e)
 	{
-	case EPOLLIN:
-		cb = read_callback_;
-		break;
-	case EPOLLOUT:
-		cb = write_callback_;
-		break;
-	case EPOLLERR:
-		cb = error_callback_;
-		break;
-	default:
-		LOG_ERROR << "unsupported event triggers: " << e;
-		return;
+		std::lock_guard<std::mutex> lock(mtx_);
+		switch (e)
+		{
+		case EPOLLIN:
+			cb = read_callback_;
+			break;
+		case EPOLLOUT:
+			cb = write_callback_;
+			break;
+		case EPOLLERR:
+			cb = error_callback_;
+			break;
+		default:
+			LOG_ERROR << "unsupported event triggers: " << e;
+			return;
+		}
 	}
 	if (cb && *cb)
 	{
+		std::lock_guard<std::mutex> q_lock(task_queue_->mtx);
 		task_queue_->tasks.push_back(std::move(cb));
 	}
 }

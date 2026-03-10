@@ -5,7 +5,6 @@
 #include <deque>
 #include <functional>
 #include <memory>
-#include <unordered_map>
 namespace koro
 {
 class Fiber;
@@ -81,7 +80,6 @@ struct TaskQueue
 	std::mutex mtx;
 	std::condition_variable cv;
 	std::atomic<bool> idling{false};
-	std::unordered_map<int, std::shared_ptr<Channel>> chs_;
 	std::shared_ptr<EpollPoller> epoller_;
 	std::shared_ptr<Channel> wakeup_ch_;
 };

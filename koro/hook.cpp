@@ -1,9 +1,12 @@
 #include "koro/hook.h"
 #include "elog/logger.h"
+#include "koro/channel.h"
 #include "koro/fiber.h"
 #include "koro/file_descriptor.h"
 #include "koro/io_manager.h"
 #include "koro/task.h"
+#include <atomic>
+#include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +18,8 @@
 #include <unistd.h>
 #include <utility>
 
+std::unique_ptr<koro::ChannelTable> koro::g_ch_table =
+	std::make_unique<koro::ChannelTable>();
 std::unique_ptr<koro::IOManager> iom = std::make_unique<koro::IOManager>(8);
 static std::once_flag flag;
 
@@ -27,6 +32,7 @@ static void init_hooks()
 	sys_write = (ssize_t(*)(int, const void*, size_t))dlsym(RTLD_NEXT, "write");
 }
 
+// Transparent Non-blocking I/O
 template <typename SysFunc, typename... Args>
 static ssize_t do_io(int fd, SysFunc sys_func, koro::IOManager::Event event,
 					 Args&&... args)
@@ -37,33 +43,38 @@ static ssize_t do_io(int fd, SysFunc sys_func, koro::IOManager::Event event,
 		return sys_func(fd, std::forward<Args>(args)...);
 	}
 
-	koro::FD::setNonBlocking(fd);
-
-retry:
-
-	ssize_t n = sys_func(fd, std::forward<Args>(args)...);
-	if (n >= 0 || errno != EAGAIN && errno != EWOULDBLOCK)
-	{
-		return n; // retry 到这就返回，不会陷入轮回
-	}
-
 	auto ch = iom->bindTaskQueue(fd);
 
-	// 非对称协程: 永远只能由“调度器”去 resume
-	// 其他普通协程。普通协程之间绝对不能互相 resume！
-	auto cb = std::make_shared<koro::ScheduledTask>(fiber);
-	bool ret = iom->registerEvent(ch, event, cb, true);
-	if (!ret)
+	if (!ch->sys_non_block_.exchange(true, std::memory_order_relaxed))
 	{
-		LOG_WARN << "register event: " << static_cast<uint32_t>(event)
-				 << " failed for fd: " << fd;
+		koro::FD::setNonBlocking(fd, true);
 	}
 
-	fiber->hold(); // 直接返回
-	// 响应后继续执行
-	iom->unregisterEvent(ch, event);
+	while (true)
+	{
+		ssize_t n = sys_func(fd, std::forward<Args>(args)...);
+		if (n >= 0 || errno != EAGAIN && errno != EWOULDBLOCK)
+		{
+			return n;
+		}
 
-	goto retry;
+		if (ch->user_non_block_.load(std::memory_order_relaxed))
+		{
+			return n;
+		}
+
+		auto cb = std::make_shared<koro::ScheduledTask>(fiber);
+		bool ret = iom->registerEvent(ch, event, cb, true);
+		if (!ret)
+		{
+			LOG_WARN << "register event: " << static_cast<uint32_t>(event)
+					 << " failed for fd: " << fd;
+			return -1;
+		}
+
+		fiber->hold();
+		iom->unregisterEvent(ch, event);
+	}
 }
 
 extern "C"
