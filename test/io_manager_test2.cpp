@@ -12,7 +12,7 @@ int main()
 {
 	// 创建包含 4 个工作线程的 IOManager
 	auto iom = std::make_unique<IOManager>(16);
-	iom->init();
+	iom.init();
 
 	const int numEvents = 100000;
 	std::atomic<int> eventsHandled{0};
@@ -32,8 +32,8 @@ int main()
 		readFds[i] = fds[0];
 		writeFds[i] = fds[1];
 
-		auto ch = iom->bindTaskQueue(readFds[i]);
-		iom->registerEvent(
+		auto ch = iom.bindTaskQueue(readFds[i]);
+		iom.registerEvent(
 			ch, koro::IOManager::Event::kRead,
 			std::make_shared<ScheduledTask>(
 				[&iom, &eventsHandled, ch, readFd = readFds[i], i]()
@@ -45,7 +45,7 @@ int main()
 						buf[n] = '\0';
 						LOG_FATAL << "Read from pipe " << i << ": " << buf;
 					}
-					iom->unregisterEvent(ch, IOManager::Event::kRead);
+					iom.unregisterEvent(ch, IOManager::Event::kRead);
 					++eventsHandled;
 				}));
 	}
@@ -57,7 +57,7 @@ int main()
 		::write(writeFds[i], msg.c_str(), msg.size());
 	}
 
-	iom->stop();
+	iom.stop();
 
 	assert(eventsHandled.load() == numEvents);
 	LOG_INFO << "events handled count: " << eventsHandled.load();

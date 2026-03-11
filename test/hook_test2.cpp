@@ -29,12 +29,12 @@ int main()
 			int n = read(readFd, buf, sizeof(buf));
 			if (n > 0)
 			{
-				// LOG_FATAL << "received: " << std::string(buf, n)
-				// 		  << " from pipe: " << i;
+				LOG_FATAL << "received: " << std::string(buf, n)
+						  << " from pipe: " << i;
 				++eventsHandled;
 			}
 		};
-		iom->submit(task1);
+		iom.submit(task1);
 	}
 
 	for (int i = 0; i < numEvents; i++)
@@ -44,11 +44,11 @@ int main()
 			char buf[] = "Hello World";
 			int n = write(writeFd, buf, sizeof(buf));
 		};
-		iom->submit(task2);
+		iom.submit(task2);
 	}
-	// std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	// std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 
-	iom->stop(); // 必须增加stop同步
+	iom.stop();
 
 	assert(eventsHandled.load() == numEvents);
 	LOG_INFO << "events handled count: " << eventsHandled.load();

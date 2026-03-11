@@ -40,6 +40,8 @@ class IOManager : public Scheduler
 	void tickle(size_t idx) override;
 	void handleError(int fd);
 };
+
+extern IOManager& iom;
 } // namespace koro
 
 #endif

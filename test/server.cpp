@@ -1,11 +1,14 @@
 #include "elog/logger.h"
 #include "koro/hook.h"
+#include "koro/io_manager.h"
 #include <arpa/inet.h>
 #include <cassert>
 #include <netinet/in.h>
 #include <string>
 #include <sys/socket.h>
 #include <unistd.h>
+
+using namespace koro;
 
 void server_loop()
 {
@@ -33,7 +36,7 @@ void server_loop()
 
 		LOG_INFO << "New client connected! fd: " << peer_fd;
 
-		iom->submit(
+		iom.submit(
 			[peer_fd]()
 			{
 				char buf[1024];
@@ -67,20 +70,20 @@ void server_loop()
 					}
 				}
 
-				::close(peer_fd);
+				close(peer_fd);
 			});
 	}
 }
 
 int main()
 {
-	iom->submit(server_loop);
+	iom.submit(server_loop);
 
 	while (true)
 	{
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
 
-	iom->stop();
+	iom.stop();
 	return 0;
 }

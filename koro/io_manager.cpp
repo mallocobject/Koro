@@ -27,17 +27,20 @@ IOManager::IOManager(size_t thread_count) : Scheduler(thread_count)
 
 IOManager::~IOManager()
 {
+	stop();
+
+	assert(stop_.load(std::memory_order_acquire));
 }
 
 std::shared_ptr<Channel> IOManager::bindTaskQueue(int fd)
 {
-	std::lock_guard<std::mutex> lock(g_ch_table->mtx);
-	while (fd >= g_ch_table->chs.size())
+	std::lock_guard<std::mutex> lock(ctable.mtx);
+	while (fd >= ctable.chs.size())
 	{
-		g_ch_table->chs.resize(fd * 1.5);
+		ctable.chs.resize(fd * 1.5);
 	}
 
-	std::shared_ptr<Channel> ch = g_ch_table->chs[fd];
+	std::shared_ptr<Channel> ch = ctable.chs[fd];
 	if (!ch)
 	{
 		if (!t_task_queue)
@@ -52,7 +55,7 @@ std::shared_ptr<Channel> IOManager::bindTaskQueue(int fd)
 			ch = std::make_shared<Channel>(fd, t_task_queue);
 		}
 
-		g_ch_table->chs[fd] = ch;
+		ctable.chs[fd] = ch;
 	}
 
 	return ch;
@@ -107,10 +110,10 @@ void IOManager::removeChannel(std::shared_ptr<Channel> ch)
 	int fd = ch->fd();
 
 	{
-		std::lock_guard<std::mutex> lock(g_ch_table->mtx);
-		if (fd < g_ch_table->chs.size() && g_ch_table->chs[fd])
+		std::lock_guard<std::mutex> lock(ctable.mtx);
+		if (fd < ctable.chs.size() && ctable.chs[fd])
 		{
-			g_ch_table->chs[fd].reset();
+			ctable.chs[fd].reset();
 		}
 	}
 

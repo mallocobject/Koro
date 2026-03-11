@@ -143,7 +143,7 @@ struct ChannelTable : public noncopyable
 	std::vector<std::shared_ptr<Channel>> chs;
 };
 
-extern std::unique_ptr<ChannelTable> g_ch_table;
+extern ChannelTable& ctable;
 } // namespace koro
 
 #endif

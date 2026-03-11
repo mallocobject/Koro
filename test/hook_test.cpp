@@ -20,7 +20,7 @@ int main()
 			LOG_INFO << "received: " << std::string(buf, n);
 		}
 	};
-	iom->submit(task1);
+	iom.submit(task1);
 
 	LOG_INFO << "before write";
 	auto task2 = [writeFd]
@@ -29,11 +29,11 @@ int main()
 		int n = write(writeFd, buf, sizeof(buf));
 		LOG_INFO << "send: " << buf;
 	};
-	iom->submit(task2);
+	iom.submit(task2);
 	LOG_INFO << "after write";
 	// std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-	iom->stop();
+	iom.stop();
 
 	return 0;
 }

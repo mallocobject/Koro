@@ -4,6 +4,8 @@
 #include <iostream>
 #include <sys/socket.h>
 
+using namespace koro;
+
 int main()
 {
 	int fd = ::socket(AF_INET, SOCK_STREAM, 0);
@@ -26,18 +28,18 @@ int main()
 		}
 		else if (n == 0)
 		{
-			::close(fd);
+			close(fd);
 		}
 	};
 
 	while (true)
 	{
-		iom->submit(read_task);
+		iom.submit(read_task);
 		std::string buf;
 		std::cout << "-> ";
 		std::getline(std::cin, buf);
 		ssize_t n = write(fd, buf.data(), buf.size());
 	}
 
-	iom->stop();
+	iom.stop();
 }

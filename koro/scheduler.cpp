@@ -65,7 +65,7 @@ void Scheduler::init()
 
 void Scheduler::stop()
 {
-	if (stop_.exchange(true, std::memory_order_seq_cst))
+	if (stop_.exchange(true, std::memory_order_acq_rel))
 	{
 		return;
 	}

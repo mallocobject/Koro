@@ -17,9 +17,9 @@ int main()
 	int readFd = fds[0];
 	int writeFd = fds[1];
 
-	auto ch = iom->bindTaskQueue(readFd);
+	auto ch = iom.bindTaskQueue(readFd);
 
-	bool ret = iom->registerEvent(
+	bool ret = iom.registerEvent(
 		ch, koro::IOManager::Event::kRead,
 		std::make_shared<ScheduledTask>(
 			[ch, readFd, writeFd]
@@ -27,9 +27,9 @@ int main()
 				char buf[10];
 				syscall(SYS_read, readFd, buf, sizeof(buf));
 				LOG_FATAL << buf;
-				auto child_ch = iom->bindTaskQueue(readFd);
+				auto child_ch = iom.bindTaskQueue(readFd);
 
-				bool ret = iom->registerEvent(
+				bool ret = iom.registerEvent(
 					child_ch, koro::IOManager::Event::kRead,
 					std::make_shared<ScheduledTask>(
 						[child_ch, readFd]
@@ -37,11 +37,11 @@ int main()
 							char buf[10];
 							syscall(SYS_read, readFd, buf, sizeof(buf));
 							LOG_FATAL << buf;
-							iom->unregisterEvent(child_ch,
-												 koro::IOManager::Event::kRead);
+							iom.unregisterEvent(child_ch,
+												koro::IOManager::Event::kRead);
 						}));
 				assert(ret);
-				iom->unregisterEvent(ch, koro::IOManager::Event::kRead);
+				iom.unregisterEvent(ch, koro::IOManager::Event::kRead);
 
 				syscall(SYS_write, writeFd, " world", 7);
 			}));
@@ -49,7 +49,7 @@ int main()
 
 	syscall(SYS_write, writeFd, "hello", 6);
 
-	iom->stop();
+	iom.stop();
 
 	::close(readFd);
 	::close(writeFd);
