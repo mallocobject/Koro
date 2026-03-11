@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <sys/epoll.h>
@@ -26,6 +27,8 @@ class Channel : public noncopyable
 	std::shared_ptr<ScheduledTask> read_callback_;
 	std::shared_ptr<ScheduledTask> write_callback_;
 	std::shared_ptr<ScheduledTask> error_callback_;
+
+	std::function<void()> on_time_callback_;
 
   public:
 	std::atomic<bool> user_non_block_{false};
@@ -130,7 +133,20 @@ class Channel : public noncopyable
 		error_callback_ = std::move(cb);
 	}
 
+	void setOnTimeCallback(std::function<void()> cb)
+	{
+		on_time_callback_ = std::move(cb);
+	}
+
 	void handleEvent();
+
+	void onTime()
+	{
+		if (on_time_callback_)
+		{
+			on_time_callback_();
+		}
+	}
 
 	void update();
 

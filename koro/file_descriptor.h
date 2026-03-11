@@ -91,6 +91,29 @@ inline bool setNonBlocking(int fd, bool on = true)
 
 	return true;
 }
+
+inline void readEventFd(int fd)
+{
+	uint64_t one = 1;
+	// ssize_t n = ::read(ch->fd(), &one, sizeof(one));
+	ssize_t n = syscall(SYS_read, fd, &one, sizeof(one));
+
+	if (n != sizeof(one))
+	{
+		LOG_ERROR << "wakeup_fd reads " << n << " bytes instead of 8";
+	}
+}
+
+inline void writeEventFd(int fd)
+{
+	uint64_t one = 1;
+	ssize_t n = syscall(SYS_write, fd, &one, sizeof(one));
+
+	if (n != sizeof(one))
+	{
+		LOG_ERROR << "wakeup_fd writes " << n << " bytes instead of 8";
+	}
+}
 } // namespace FD
 } // namespace koro
 

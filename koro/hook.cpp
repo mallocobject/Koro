@@ -65,6 +65,7 @@ static ssize_t do_io(int fd, SysFunc sys_func, koro::IOManager::Event event,
 			return n;
 		}
 
+		// save task fiber context
 		auto cb = std::make_shared<koro::ScheduledTask>(fiber);
 		bool ret = koro::iom.registerEvent(ch, event, cb, true);
 		if (!ret)
@@ -74,7 +75,9 @@ static ssize_t do_io(int fd, SysFunc sys_func, koro::IOManager::Event event,
 			return -1;
 		}
 
-		fiber->hold();
+		fiber->hold(); // change to scheduler fiber
+
+		// return task fiber
 		koro::iom.unregisterEvent(ch, event);
 	}
 }

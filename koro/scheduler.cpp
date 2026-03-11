@@ -9,7 +9,6 @@
 #include <memory>
 #include <mutex>
 #include <thread>
-#include <utility>
 
 namespace koro
 {
@@ -213,7 +212,8 @@ void Scheduler::run(size_t thread_index)
 		}
 		else
 		{
-			auto fiber_wrapper = std::make_shared<Fiber>(std::move(task->cb));
+			auto fiber_wrapper =
+				std::make_shared<Fiber>(task->cb); // 不准用move掏空
 			fiber_wrapper->resume();
 		}
 

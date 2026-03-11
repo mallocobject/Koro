@@ -6,6 +6,8 @@
 #include "koro/file_descriptor.h"
 #include "koro/scheduler.h"
 #include "koro/task.h"
+#include "koro/timer_manager.h"
+#include "koro/timestamp.h"
 #include <atomic>
 #include <cassert>
 #include <cstddef>
@@ -62,8 +64,8 @@ std::shared_ptr<Channel> IOManager::bindTaskQueue(int fd)
 }
 
 bool IOManager::registerEvent(std::shared_ptr<Channel> ch, Event e,
-							  std::shared_ptr<ScheduledTask> cb, bool useET,
-							  int timeout)
+							  const std::shared_ptr<ScheduledTask>& cb,
+							  bool useET, int timeout)
 {
 	assert(ch->taskQueue());
 	uint32_t event = static_cast<uint32_t>(e);
@@ -71,11 +73,11 @@ bool IOManager::registerEvent(std::shared_ptr<Channel> ch, Event e,
 		std::lock_guard<std::mutex> lock(ch->mtx_);
 		if (event == 0x001)
 		{
-			ch->setReadCallback(std::move(cb));
+			ch->setReadCallback(cb);
 		}
 		else if (event == 0x004)
 		{
-			ch->setWriteCallback(std::move(cb));
+			ch->setWriteCallback(cb);
 		}
 		else
 		{
@@ -161,6 +163,10 @@ void IOManager::onInit()
 		auto wakeup_ch = std::make_shared<Channel>(wakeup_fd, task_queue.get());
 		wakeup_ch->enableReading();
 		task_queue->wakeup_ch_ = std::move(wakeup_ch);
+
+		auto tm = std::make_shared<TimerManager>(task_queue.get());
+		task_queue->timer_ch_ = tm->ch();
+		task_queue->tm_ = std::move(tm);
 	}
 }
 
@@ -191,15 +197,11 @@ void IOManager::idle(size_t idx)
 
 				if (ch == task_queue.wakeup_ch_.get())
 				{
-					uint64_t one = 1;
-					// ssize_t n = ::read(ch->fd(), &one, sizeof(one));
-					ssize_t n = syscall(SYS_read, ch->fd(), &one, sizeof(one));
-
-					if (n != sizeof(one))
-					{
-						LOG_ERROR << "wakeup_fd reads " << n
-								  << " bytes instead of 8";
-					}
+					FD::readEventFd(ch->fd());
+				}
+				else if (ch == task_queue.timer_ch_)
+				{
+					ch->onTime();
 				}
 				else
 				{
@@ -220,22 +222,46 @@ void IOManager::idle(size_t idx)
 
 void IOManager::tickle(size_t idx)
 {
-	uint64_t one = 1;
 	TaskQueue& task_queue = *task_queues_[idx];
 	if (task_queue.idling.load(std::memory_order_seq_cst))
 	{
-		// ssize_t n = ::write(task_queue.wakeup_ch_->fd(), &one,
-		// 					sizeof(one)); // 唤醒 epoll_wait
-		ssize_t n =
-			syscall(SYS_write, task_queue.wakeup_ch_->fd(), &one, sizeof(one));
-
-		if (n != sizeof(one))
-		{
-			LOG_ERROR << "wakeup_fd writes " << n << " bytes instead of 8";
-		}
+		FD::writeEventFd(task_queue.wakeup_ch_->fd());
 	}
 }
 
 void IOManager::handleError(int fd)
 {
+}
+
+TimerId IOManager::runAt(Timestamp timestamp,
+						 const std::shared_ptr<ScheduledTask>& cb)
+{
+	assert(t_task_queue);
+	pending_event_count_.fetch_add(1, std::memory_order_release);
+	return t_task_queue->tm_->registerTimer(timestamp, cb, -1);
+}
+
+TimerId IOManager::runAfter(double delay_sec,
+							const std::shared_ptr<ScheduledTask>& cb)
+{
+	assert(t_task_queue);
+	pending_event_count_.fetch_add(1, std::memory_order_release);
+	return t_task_queue->tm_->registerTimer(Timestamp::now() + delay_sec, cb,
+											-1);
+}
+
+TimerId IOManager::runEvery(double interval_sec,
+							const std::shared_ptr<ScheduledTask>& cb)
+{
+	assert(t_task_queue);
+	pending_event_count_.fetch_add(1, std::memory_order_release);
+	return t_task_queue->tm_->registerTimer(Timestamp::now() + interval_sec, cb,
+											interval_sec);
+}
+
+void IOManager::cancellTimer(TimerId timer_id)
+{
+	assert(t_task_queue);
+	pending_event_count_.fetch_sub(1, std::memory_order_release);
+	t_task_queue->tm_->unregisterEvent(timer_id);
 }

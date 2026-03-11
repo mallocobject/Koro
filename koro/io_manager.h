@@ -2,6 +2,8 @@
 #define KORO_IO_MANAGER_H
 
 #include "koro/scheduler.h"
+#include "koro/timer_id.h"
+#include "koro/timestamp.h"
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -27,12 +29,21 @@ class IOManager : public Scheduler
 	std::shared_ptr<Channel> bindTaskQueue(int fd);
 
 	bool registerEvent(std::shared_ptr<Channel> ch, Event e,
-					   std::shared_ptr<ScheduledTask> cb, bool useET = false,
-					   int timeout = -1);
+					   const std::shared_ptr<ScheduledTask>& cb,
+					   bool useET = false, int timeout = -1);
 	void removeChannel(std::shared_ptr<Channel> ch);
 
 	void unregisterEvent(std::shared_ptr<Channel> ch, Event e);
 	// void unregisterEventAfterDone(Channel* ch, Event e); // deprecate
+
+	TimerId runAt(Timestamp timestamp,
+				  const std::shared_ptr<ScheduledTask>& cb);
+	TimerId runAfter(double delay_sec,
+					 const std::shared_ptr<ScheduledTask>& cb);
+	TimerId runEvery(double interval_sec,
+					 const std::shared_ptr<ScheduledTask>& cb);
+
+	void cancellTimer(TimerId timer_id);
 
   protected:
 	void onInit() override;

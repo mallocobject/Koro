@@ -10,6 +10,7 @@ namespace koro
 class Fiber;
 class EpollPoller;
 class Channel;
+class TimerManager;
 struct ScheduledTask
 {
 	using function = std::function<void()>;
@@ -82,6 +83,8 @@ struct TaskQueue
 	std::atomic<bool> idling{false};
 	std::shared_ptr<EpollPoller> epoller_;
 	std::shared_ptr<Channel> wakeup_ch_;
+	std::shared_ptr<TimerManager> tm_;
+	Channel* timer_ch_;
 };
 } // namespace koro
 
