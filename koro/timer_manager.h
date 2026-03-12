@@ -4,6 +4,7 @@
 #include "koro/noncopyable.h"
 #include "koro/timer_id.h"
 #include "koro/timestamp.h"
+#include <functional>
 #include <memory>
 #include <set>
 #include <utility>
@@ -12,7 +13,6 @@ namespace koro
 {
 class Timer;
 class Channel;
-class ScheduledTask;
 class TaskQueue;
 class TimerManager : public noncopyable
 {
@@ -29,8 +29,7 @@ class TimerManager : public noncopyable
 	explicit TimerManager(TaskQueue* task_queue);
 	~TimerManager();
 
-	TimerId registerTimer(Timestamp timestamp,
-						  const std::shared_ptr<ScheduledTask>& cb,
+	TimerId registerTimer(Timestamp timestamp, const std::function<void()>& cb,
 						  double interval);
 	void unregisterEvent(TimerId timer_id);
 

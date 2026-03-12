@@ -64,8 +64,8 @@ std::shared_ptr<Channel> IOManager::bindTaskQueue(int fd)
 }
 
 bool IOManager::registerEvent(std::shared_ptr<Channel> ch, Event e,
-							  const std::shared_ptr<ScheduledTask>& cb,
-							  bool useET, int timeout)
+							  const std::function<void()>& cb, bool useET,
+							  int timeout)
 {
 	assert(ch->taskQueue());
 	uint32_t event = static_cast<uint32_t>(e);
@@ -86,10 +86,17 @@ bool IOManager::registerEvent(std::shared_ptr<Channel> ch, Event e,
 			return false;
 		}
 
-		ch->setErrorCallback(std::make_shared<ScheduledTask>(
-			std::bind(&IOManager::handleError, this, ch->fd())));
+		std::weak_ptr<Channel> wch = ch;
+		ch->setErrorCallback(
+			[this, wch]
+			{
+				if (auto share_ch = wch.lock())
+				{
+					handleError(share_ch);
+				}
+			});
 
-		ch->setEvents(event);
+		ch->setEvents(ch->events() | event);
 		if (useET)
 		{
 			ch->useET();
@@ -120,8 +127,14 @@ void IOManager::removeChannel(std::shared_ptr<Channel> ch)
 	}
 
 	// ch->disableAll();
-	ch->setEvents(0);
-	ch->remove();
+	ch->setReadCallback(nullptr);
+	ch->setWriteCallback(nullptr);
+	ch->setErrorCallback(nullptr);
+	if (ch->inEpoll())
+	{
+		ch->setEvents(0);
+		ch->remove();
+	}
 }
 
 void IOManager::unregisterEvent(std::shared_ptr<Channel> ch, Event e)
@@ -136,14 +149,14 @@ void IOManager::unregisterEvent(std::shared_ptr<Channel> ch, Event e)
 		if (event & 0x001)
 		{
 			// ch->disableReading();
-			ch->setEvents(event & ~0x001);
+			ch->setEvents(ch->events() & ~0x001);
 			ch->setReadCallback(nullptr);
 			ban_event_count++;
 		}
 		if (event & 0x004)
 		{
 			// ch->disableWriting();
-			ch->setEvents(event & ~0x004);
+			ch->setEvents(ch->events() & ~0x004);
 			ch->setWriteCallback(nullptr);
 			ban_event_count++;
 		}
@@ -151,20 +164,24 @@ void IOManager::unregisterEvent(std::shared_ptr<Channel> ch, Event e)
 		ch->update();
 	}
 
-	pending_event_count_.fetch_sub(ban_event_count, std::memory_order_release);
+	if (ban_event_count > 0)
+	{
+		pending_event_count_.fetch_sub(ban_event_count,
+									   std::memory_order_release);
+	}
 }
 
 void IOManager::onInit()
 {
 	for (auto& task_queue : task_queues_)
 	{
-		task_queue->epoller_ = std::make_shared<EpollPoller>();
+		task_queue->epoller_ = std::make_unique<EpollPoller>();
 		int wakeup_fd = FD::createEventFd();
-		auto wakeup_ch = std::make_shared<Channel>(wakeup_fd, task_queue.get());
+		auto wakeup_ch = std::make_unique<Channel>(wakeup_fd, task_queue.get());
 		wakeup_ch->enableReading();
 		task_queue->wakeup_ch_ = std::move(wakeup_ch);
 
-		auto tm = std::make_shared<TimerManager>(task_queue.get());
+		auto tm = std::make_unique<TimerManager>(task_queue.get());
 		task_queue->timer_ch_ = tm->ch();
 		task_queue->tm_ = std::move(tm);
 	}
@@ -229,20 +246,18 @@ void IOManager::tickle(size_t idx)
 	}
 }
 
-void IOManager::handleError(int fd)
+void IOManager::handleError(std::shared_ptr<Channel> ch)
 {
 }
 
-TimerId IOManager::runAt(Timestamp timestamp,
-						 const std::shared_ptr<ScheduledTask>& cb)
+TimerId IOManager::runAt(Timestamp timestamp, const std::function<void()>& cb)
 {
 	assert(t_task_queue);
 	pending_event_count_.fetch_add(1, std::memory_order_release);
 	return t_task_queue->tm_->registerTimer(timestamp, cb, -1);
 }
 
-TimerId IOManager::runAfter(double delay_sec,
-							const std::shared_ptr<ScheduledTask>& cb)
+TimerId IOManager::runAfter(double delay_sec, const std::function<void()>& cb)
 {
 	assert(t_task_queue);
 	pending_event_count_.fetch_add(1, std::memory_order_release);
@@ -251,7 +266,7 @@ TimerId IOManager::runAfter(double delay_sec,
 }
 
 TimerId IOManager::runEvery(double interval_sec,
-							const std::shared_ptr<ScheduledTask>& cb)
+							const std::function<void()>& cb)
 {
 	assert(t_task_queue);
 	pending_event_count_.fetch_add(1, std::memory_order_release);

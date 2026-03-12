@@ -13,7 +13,6 @@
 #include <vector>
 namespace koro
 {
-class ScheduledTask;
 class TaskQueue;
 class Channel : public noncopyable
 {
@@ -24,9 +23,9 @@ class Channel : public noncopyable
 	uint32_t revents_{0};
 	bool in_epoll_{false};
 
-	std::shared_ptr<ScheduledTask> read_callback_;
-	std::shared_ptr<ScheduledTask> write_callback_;
-	std::shared_ptr<ScheduledTask> error_callback_;
+	std::function<void()> read_callback_;
+	std::function<void()> write_callback_;
+	std::function<void()> error_callback_;
 
 	std::function<void()> on_time_callback_;
 
@@ -118,17 +117,17 @@ class Channel : public noncopyable
 		return events_ & EPOLLOUT;
 	}
 
-	void setReadCallback(std::shared_ptr<ScheduledTask> cb)
+	void setReadCallback(std::function<void()> cb)
 	{
 		read_callback_ = std::move(cb);
 	}
 
-	void setWriteCallback(std::shared_ptr<ScheduledTask> cb)
+	void setWriteCallback(std::function<void()> cb)
 	{
 		write_callback_ = std::move(cb);
 	}
 
-	void setErrorCallback(std::shared_ptr<ScheduledTask> cb)
+	void setErrorCallback(std::function<void()> cb)
 	{
 		error_callback_ = std::move(cb);
 	}

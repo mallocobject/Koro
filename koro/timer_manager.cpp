@@ -2,6 +2,7 @@
 #include "elog/logger.h"
 #include "koro/channel.h"
 #include "koro/file_descriptor.h"
+#include "koro/hook.h"
 #include "koro/task.h"
 #include "koro/timer.h"
 #include "koro/timer_id.h"
@@ -25,14 +26,18 @@ TimerManager::TimerManager(TaskQueue* task_queue) : task_queue_(task_queue)
 
 TimerManager::~TimerManager()
 {
+	int fd = ch_->fd();
 	ch_->disableAll();
 	ch_->remove();
+	ch_.reset();
+
+	close(fd);
 
 	timers_.clear();
 }
 
 TimerId TimerManager::registerTimer(Timestamp timestamp,
-									const std::shared_ptr<ScheduledTask>& cb,
+									const std::function<void()>& cb,
 									double interval)
 {
 	std::shared_ptr<Timer> timer(new Timer(timestamp, cb, interval));
@@ -79,7 +84,8 @@ void TimerManager::triggerTimer()
 		if (timer->on())
 		{
 			std::lock_guard<std::mutex> q_lock(task_queue_->mtx);
-			task_queue_->tasks.push_back(timer->onTimeCallback());
+			task_queue_->tasks.push_back(
+				std::make_shared<ScheduledTask>(timer->on_time_callback_));
 		}
 	}
 	resetTimer();

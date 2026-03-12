@@ -1,12 +1,10 @@
 #include "koro/channel.h"
 #include "elog/logger.h"
 #include "koro/epoll_poller.h"
-#include "koro/file_descriptor.h"
 #include "koro/task.h"
 #include <cassert>
-#include <memory>
+#include <functional>
 #include <unistd.h>
-#include <utility>
 
 using namespace koro;
 
@@ -17,7 +15,6 @@ Channel::Channel(int fd, TaskQueue* task_queue)
 
 Channel::~Channel()
 {
-	FD::close(fd_);
 }
 
 void Channel::remove()
@@ -51,7 +48,7 @@ void Channel::handleEvent()
 
 void Channel::triggerEvent(uint32_t e)
 {
-	std::shared_ptr<ScheduledTask> cb;
+	std::function<void()> cb;
 	{
 		std::lock_guard<std::mutex> lock(mtx_);
 		switch (e)
@@ -70,9 +67,9 @@ void Channel::triggerEvent(uint32_t e)
 			return;
 		}
 	}
-	if (cb && *cb)
+	if (cb)
 	{
 		std::lock_guard<std::mutex> q_lock(task_queue_->mtx);
-		task_queue_->tasks.push_back(std::move(cb));
+		task_queue_->tasks.push_back(std::make_shared<ScheduledTask>(cb));
 	}
 }

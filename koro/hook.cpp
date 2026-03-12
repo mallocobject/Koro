@@ -5,6 +5,7 @@
 #include "koro/fiber.h"
 #include "koro/file_descriptor.h"
 #include "koro/io_manager.h"
+#include "koro/scheduler.h"
 #include "koro/task.h"
 #include <atomic>
 #include <cassert>
@@ -26,12 +27,15 @@ static std::once_flag flag;
 static int (*sys_close)(int) = nullptr;
 static ssize_t (*sys_read)(int, void*, size_t) = nullptr;
 static ssize_t (*sys_write)(int, const void*, size_t) = nullptr;
+static int (*sys_accept)(int, struct sockaddr*, socklen_t*) = nullptr;
 
 static void init_hooks()
 {
 	sys_close = (int (*)(int))dlsym(RTLD_NEXT, "close");
 	sys_read = (ssize_t(*)(int, void*, size_t))dlsym(RTLD_NEXT, "read");
 	sys_write = (ssize_t(*)(int, const void*, size_t))dlsym(RTLD_NEXT, "write");
+	sys_accept =
+		(int (*)(int, struct sockaddr*, socklen_t*))dlsym(RTLD_NEXT, "accept");
 }
 
 // Transparent Non-blocking I/O
@@ -66,7 +70,17 @@ static ssize_t do_io(int fd, SysFunc sys_func, koro::IOManager::Event event,
 		}
 
 		// save task fiber context
-		auto cb = std::make_shared<koro::ScheduledTask>(fiber);
+		std::weak_ptr<koro::Fiber> weak_fiber = fiber;
+
+		auto cb = [weak_fiber]()
+		{
+			if (auto f = weak_fiber.lock())
+			{
+				std::lock_guard<std::mutex> lock(koro::t_task_queue->mtx);
+				koro::t_task_queue->tasks.push_back(
+					std::make_shared<koro::ScheduledTask>(f));
+			}
+		};
 		bool ret = koro::iom.registerEvent(ch, event, cb, true);
 		if (!ret)
 		{
@@ -87,12 +101,23 @@ extern "C"
 	int close(int fd)
 	{
 		std::call_once(flag, init_hooks);
-		std::lock_guard<std::mutex> lock(koro::ctable.mtx);
-		if (fd < koro::ctable.chs.size())
+		std::shared_ptr<koro::Channel> ch;
 		{
-			koro::ctable.chs[fd].reset();
-			return 0;
+			std::lock_guard<std::mutex> lock(koro::ctable.mtx);
+			if (fd >= 0 && fd < koro::ctable.chs.size())
+			{
+				// std::cout << koro::ctable.chs[fd].use_count() << std::endl;
+				ch = koro::ctable.chs[fd];
+			}
 		}
+
+		if (ch)
+		{
+			koro::iom.removeChannel(ch);
+		}
+
+		// std::cout << ch.use_count() << std::endl;
+
 		return sys_close(fd);
 	}
 
@@ -129,5 +154,12 @@ extern "C"
 			total += ret;
 		}
 		return total;
+	}
+
+	int accept(int fd, sockaddr* addr, socklen_t* addr_len)
+	{
+		std::call_once(flag, init_hooks);
+		return static_cast<int>(do_io(
+			fd, sys_accept, koro::IOManager::Event::kRead, addr, addr_len));
 	}
 }

@@ -81,10 +81,13 @@ struct TaskQueue
 	std::mutex mtx;
 	std::condition_variable cv;
 	std::atomic<bool> idling{false};
-	std::shared_ptr<EpollPoller> epoller_;
-	std::shared_ptr<Channel> wakeup_ch_;
-	std::shared_ptr<TimerManager> tm_;
+	std::unique_ptr<EpollPoller> epoller_;
+	std::unique_ptr<Channel> wakeup_ch_;
+	std::unique_ptr<TimerManager> tm_;
 	Channel* timer_ch_;
+
+	TaskQueue();
+	~TaskQueue();
 };
 } // namespace koro
 

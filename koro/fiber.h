@@ -2,6 +2,7 @@
 #define KORO_FIBER_H
 
 #include "koro/noncopyable.h"
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -34,9 +35,11 @@ class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 	uint32_t stack_size_{0};
 	void* stack_sp_{nullptr};
 
+	std::atomic<bool> execute{false};
+
   public:
 	Fiber(function cb, bool run_in_scheduler = true,
-		  uint32_t stack_size = 128 * 1024);
+		  uint32_t stack_size = 16 * 1024);
 	~Fiber();
 
 	void resetFunc(function cb);
@@ -47,6 +50,18 @@ class Fiber : public noncopyable, public std::enable_shared_from_this<Fiber>
 	State state() const
 	{
 		return state_;
+	}
+
+	bool tryLock()
+	{
+		bool expected = false;
+		return execute.compare_exchange_strong(expected, true,
+											   std::memory_order_acquire);
+	}
+
+	void unlock()
+	{
+		execute.store(false, std::memory_order_release);
 	}
 
   private:

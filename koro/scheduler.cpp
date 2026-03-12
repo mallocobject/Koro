@@ -200,6 +200,12 @@ void Scheduler::run(size_t thread_index)
 
 		if (task->fiber)
 		{
+			if (!task->fiber->tryLock())
+			{
+				std::lock_guard<std::mutex> q_lock(t_task_queue->mtx);
+				t_task_queue->tasks.push_back(task);
+				continue;
+			}
 
 			task->fiber->resume();
 			assert(task->fiber->state() != Fiber::State::kRunning);
@@ -209,6 +215,8 @@ void Scheduler::run(size_t thread_index)
 				std::lock_guard<std::mutex> q_lock(t_task_queue->mtx);
 				t_task_queue->tasks.push_back(task);
 			}
+
+			task->fiber->unlock();
 		}
 		else
 		{

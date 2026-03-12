@@ -6,11 +6,11 @@
 #include "koro/timestamp.h"
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 namespace koro
 {
 class Channel;
-class ScheduledTask;
 class IOManager : public Scheduler
 {
 	using function = std::function<void()>;
@@ -29,19 +29,16 @@ class IOManager : public Scheduler
 	std::shared_ptr<Channel> bindTaskQueue(int fd);
 
 	bool registerEvent(std::shared_ptr<Channel> ch, Event e,
-					   const std::shared_ptr<ScheduledTask>& cb,
-					   bool useET = false, int timeout = -1);
+					   const std::function<void()>& cb, bool useET = false,
+					   int timeout = -1);
 	void removeChannel(std::shared_ptr<Channel> ch);
 
 	void unregisterEvent(std::shared_ptr<Channel> ch, Event e);
 	// void unregisterEventAfterDone(Channel* ch, Event e); // deprecate
 
-	TimerId runAt(Timestamp timestamp,
-				  const std::shared_ptr<ScheduledTask>& cb);
-	TimerId runAfter(double delay_sec,
-					 const std::shared_ptr<ScheduledTask>& cb);
-	TimerId runEvery(double interval_sec,
-					 const std::shared_ptr<ScheduledTask>& cb);
+	TimerId runAt(Timestamp timestamp, const std::function<void()>& cb);
+	TimerId runAfter(double delay_sec, const std::function<void()>& cb);
+	TimerId runEvery(double interval_sec, const std::function<void()>& cb);
 
 	void cancellTimer(TimerId timer_id);
 
@@ -49,7 +46,7 @@ class IOManager : public Scheduler
 	void onInit() override;
 	void idle(size_t idx) override;
 	void tickle(size_t idx) override;
-	void handleError(int fd);
+	void handleError(std::shared_ptr<Channel> ch);
 };
 
 extern IOManager& iom;

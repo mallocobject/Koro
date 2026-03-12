@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <sys/mman.h>
 #include <ucontext.h>
 #include <utility>
 
@@ -40,6 +41,13 @@ Fiber::Fiber(function cb, bool run_in_scheduler, uint32_t stack_size)
 {
 	assert(stack_size != 0);
 	stack_sp_ = ::malloc(stack_size);
+	// stack_sp_ = ::mmap(nullptr, stack_size_, PROT_READ | PROT_WRITE,
+	// 				   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	// if (stack_sp_ == MAP_FAILED)
+	// {
+	// 	LOG_FATAL << "mmap stack failed: " << ::strerror(errno);
+	// 	::exit(EXIT_FAILURE);
+	// }
 
 	if (::getcontext(&ctx_))
 	{
@@ -60,6 +68,7 @@ Fiber::~Fiber()
 	if (stack_sp_)
 	{
 		::free(stack_sp_);
+		// ::munmap(stack_sp_, stack_size_);
 	}
 	else
 	{
@@ -90,6 +99,9 @@ void Fiber::resetFunc(function cb)
 
 void Fiber::resume()
 {
+	LOG_TRACE << "resume fiber " << (void*)this
+			  << ", current state = " << (int)state_
+			  << " (0=ready,1=running,2=hold,3=term)";
 	assert(state_ == State::kReady || state_ == State::kHold);
 	state_ = State::kRunning;
 

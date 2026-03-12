@@ -48,8 +48,6 @@ class Scheduler : public noncopyable
 
 	void run(size_t thread_index);
 
-	// 默认实现：cv.wait_for
-	// IOManager实现：epoll_wait（最近定时器时间）
 	virtual void idle(size_t idx);
 
 	virtual bool stopping(size_t skip_idx = std::numeric_limits<size_t>::max());

@@ -7,7 +7,7 @@ using namespace koro;
 
 int main()
 {
-	const int numEvents = 100000;
+	const int numEvents = 50000;
 	std::atomic<int> eventsHandled{0};
 	std::vector<int> readFds(numEvents);
 	std::vector<int> writeFds(numEvents);
@@ -30,10 +30,11 @@ int main()
 			int n = read(readFd, buf, sizeof(buf));
 			if (n > 0)
 			{
-				LOG_FATAL << "received: " << std::string(buf, n)
-						  << " from pipe: " << i;
+				// LOG_FATAL << "received: " << std::string(buf, n)
+				// 		  << " from pipe: " << i;
 				++eventsHandled;
 			}
+			// close(readFd);
 		};
 		iom.submit(task1);
 	}
@@ -44,16 +45,17 @@ int main()
 		{
 			char buf[] = "Hello World";
 			int n = write(writeFd, buf, sizeof(buf));
+			// close(writeFd);
 		};
 		iom.submit(task2);
 	}
-
-	// std::this_thread::sleep_for(std::chrono::milliseconds(15000));
 
 	iom.stop();
 
 	assert(eventsHandled.load() == numEvents);
 	LOG_INFO << "events handled count: " << eventsHandled.load();
+
+	// std::this_thread::sleep_for(std::chrono::milliseconds(10000));
 
 	return 0;
 }

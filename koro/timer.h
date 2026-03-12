@@ -4,10 +4,9 @@
 #include "koro/noncopyable.h"
 #include "koro/timestamp.h"
 #include <atomic>
-#include <memory>
+#include <functional>
 namespace koro
 {
-class ScheduledTask;
 class TimerManager;
 class Timer : public noncopyable
 {
@@ -18,10 +17,10 @@ class Timer : public noncopyable
 	double interval_{-1};
 	bool repeat_{false};
 	std::atomic<bool> on_{false};
-	std::shared_ptr<ScheduledTask> on_time_callback_;
+	std::function<void()> on_time_callback_;
 
   private:
-	explicit Timer(Timestamp expiration, std::shared_ptr<ScheduledTask> cb,
+	explicit Timer(Timestamp expiration, std::function<void()> cb,
 				   double interval)
 		: expiration_(expiration), on_time_callback_(std::move(cb)),
 		  interval_(interval), repeat_(interval > 0.0)
@@ -53,10 +52,10 @@ class Timer : public noncopyable
 		return expiration_;
 	}
 
-	std::shared_ptr<ScheduledTask> onTimeCallback()
-	{
-		return on_time_callback_;
-	}
+	// std::function<void()> onTimeCallback()
+	// {
+	// 	return on_time_callback_;
+	// }
 
 	void repeat()
 	{
