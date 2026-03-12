@@ -204,6 +204,14 @@ void Scheduler::run(size_t thread_index)
 			{
 				std::lock_guard<std::mutex> q_lock(t_task_queue->mtx);
 				t_task_queue->tasks.push_back(task);
+				active_thread_count_.fetch_sub(1, std::memory_order_release);
+				continue;
+			}
+
+			if (task->fiber->state() == Fiber::State::kTerm)
+			{
+				task->fiber->unlock();
+				active_thread_count_.fetch_sub(1, std::memory_order_release);
 				continue;
 			}
 
@@ -222,7 +230,16 @@ void Scheduler::run(size_t thread_index)
 		{
 			auto fiber_wrapper =
 				std::make_shared<Fiber>(task->cb); // 不准用move掏空
+			fiber_wrapper->tryLock();
 			fiber_wrapper->resume();
+
+			if (fiber_wrapper->state() == Fiber::State::kReady)
+			{
+				std::lock_guard<std::mutex> q_lock(t_task_queue->mtx);
+				t_task_queue->tasks.push_back(
+					std::make_shared<ScheduledTask>(fiber_wrapper));
+			}
+			fiber_wrapper->unlock();
 		}
 
 		active_thread_count_.fetch_sub(1, std::memory_order_release);

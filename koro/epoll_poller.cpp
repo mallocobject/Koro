@@ -31,7 +31,7 @@ void EpollPoller::updateChannel(Channel* ch)
 {
 	epoll_event ev;
 	ev.events = ch->events();
-	ev.data.ptr = ch;
+	ev.data.fd = ch->fd();
 
 	if (ch->inEpoll())
 	{
@@ -62,7 +62,7 @@ void EpollPoller::removeChannel(Channel* ch)
 	ch->setInEpoll(false);
 }
 
-void EpollPoller::poll(std::vector<Channel*>* active_chs, int timeout)
+void EpollPoller::poll(std::vector<epoll_event>* active_evs, int timeout)
 {
 	int nevs = ::epoll_wait(epfd_, evs_.data(), evs_.size(), timeout);
 
@@ -82,9 +82,7 @@ void EpollPoller::poll(std::vector<Channel*>* active_chs, int timeout)
 
 	for (size_t i = 0; i < nevs; i++)
 	{
-		Channel* ch = reinterpret_cast<Channel*>(evs_[i].data.ptr);
-		ch->setReadyEvent(evs_[i].events);
-		active_chs->push_back(ch);
+		active_evs->push_back(evs_[i]);
 	}
 
 	if (nevs == evs_.size())

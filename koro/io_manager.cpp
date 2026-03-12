@@ -15,6 +15,8 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
+#include <sys/epoll.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
@@ -24,7 +26,6 @@ using namespace koro;
 
 IOManager::IOManager(size_t thread_count) : Scheduler(thread_count)
 {
-	init();
 }
 
 IOManager::~IOManager()
@@ -36,10 +37,12 @@ IOManager::~IOManager()
 
 std::shared_ptr<Channel> IOManager::bindTaskQueue(int fd)
 {
-	std::lock_guard<std::mutex> lock(ctable.mtx);
+	init();
+
+	std::unique_lock<std::shared_mutex> lock(ctable.mtx);
 	while (fd >= ctable.chs.size())
 	{
-		ctable.chs.resize(fd * 1.5);
+		ctable.chs.resize(std::max<size_t>(fd * 1.5, fd + 16));
 	}
 
 	std::shared_ptr<Channel> ch = ctable.chs[fd];
@@ -119,7 +122,7 @@ void IOManager::removeChannel(std::shared_ptr<Channel> ch)
 	int fd = ch->fd();
 
 	{
-		std::lock_guard<std::mutex> lock(ctable.mtx);
+		std::unique_lock<std::shared_mutex> lock(ctable.mtx);
 		if (fd < ctable.chs.size() && ctable.chs[fd])
 		{
 			ctable.chs[fd].reset();
@@ -190,10 +193,10 @@ void IOManager::onInit()
 void IOManager::idle(size_t idx)
 {
 	TaskQueue& task_queue = *task_queues_[idx];
-	std::vector<Channel*> active_chs;
+	std::vector<epoll_event> active_evs;
 	while (true)
 	{
-		active_chs.clear();
+		active_evs.clear();
 		task_queue.idling.store(true, std::memory_order_seq_cst);
 		if (stopping())
 		{
@@ -202,27 +205,53 @@ void IOManager::idle(size_t idx)
 			break;
 		}
 
+		bool has_task = false;
+		{
+			std::lock_guard<std::mutex> lock(task_queue.mtx);
+			has_task = !task_queue.tasks.empty();
+		}
+		if (has_task)
+		{
+			task_queue.idling.store(false, std::memory_order_release);
+			Fiber::runningFiber()->yield();
+			continue;
+		}
+
 		static const int kMaxTimeoutMs = -1;
 		LOG_TRACE << "epoll: " << idx << " enter waiting state";
-		task_queue.epoller_->poll(&active_chs, kMaxTimeoutMs);
+		task_queue.epoller_->poll(&active_evs, kMaxTimeoutMs);
 		LOG_TRACE << "epoll: " << idx << " out of waiting state";
 		task_queue.idling.store(false, std::memory_order_release);
 
 		{
-			for (auto& ch : active_chs)
+			for (auto& ev : active_evs)
 			{
-
-				if (ch == task_queue.wakeup_ch_.get())
+				int fd = ev.data.fd;
+				uint32_t revents = ev.events;
+				if (task_queue.wakeup_ch_ && task_queue.wakeup_ch_->fd() == fd)
 				{
-					FD::readEventFd(ch->fd());
+					FD::readEventFd(fd);
 				}
-				else if (ch == task_queue.timer_ch_)
+				else if (task_queue.timer_ch_ &&
+						 task_queue.timer_ch_->fd() == fd)
 				{
-					ch->onTime();
+					task_queue.timer_ch_->onTime();
 				}
 				else
 				{
-					ch->handleEvent();
+					std::shared_ptr<Channel> ch;
+					{
+						std::shared_lock<std::shared_mutex> lock(ctable.mtx);
+						if (fd >= 0 && fd < ctable.chs.size())
+						{
+							ch = ctable.chs[fd];
+						}
+					}
+					if (ch)
+					{
+						ch->setReadyEvent(revents);
+						ch->handleEvent();
+					}
 				}
 			}
 		}

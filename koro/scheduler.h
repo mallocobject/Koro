@@ -63,6 +63,8 @@ template <typename CF>
 			 std::invocable<CF> && std::same_as<std::invoke_result_t<CF>, void>
 			 void Scheduler::submit(CF&& cf)
 {
+	init();
+
 	bool need_tickle = false;
 
 	// fetch_add return old val

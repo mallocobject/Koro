@@ -7,7 +7,7 @@ using namespace koro;
 
 int main()
 {
-	const int numEvents = 50000;
+	const int numEvents = 100000;
 	std::atomic<int> eventsHandled{0};
 	std::vector<int> readFds(numEvents);
 	std::vector<int> writeFds(numEvents);
@@ -30,8 +30,8 @@ int main()
 			int n = read(readFd, buf, sizeof(buf));
 			if (n > 0)
 			{
-				// LOG_FATAL << "received: " << std::string(buf, n)
-				// 		  << " from pipe: " << i;
+				LOG_FATAL << "received: " << std::string(buf, n)
+						  << " from pipe: " << i;
 				++eventsHandled;
 			}
 			// close(readFd);

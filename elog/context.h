@@ -9,7 +9,7 @@ namespace elog
 {
 struct Context
 {
-	Timestamp timestamp{0};
+	Timestamp timestamp{};
 	uint64_t tid{0};
 	uint8_t level{2};
 

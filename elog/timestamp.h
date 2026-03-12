@@ -1,38 +1,41 @@
 #ifndef ELOG_TIMESTAMP_H
 #define ELOG_TIMESTAMP_H
 
-#include <cstdint>
+#include <chrono>
 #include <ostream>
 #include <string>
 namespace elog
 {
-extern const int kMicroSecond2Second;
-
-class Timestamp
+struct Timestamp
 {
-  private:
-	int64_t micro_seconds_{0};
+	using Clock = std::chrono::system_clock;
+	using TimePoint = std::chrono::time_point<Clock, std::chrono::microseconds>;
 
-  public:
-	Timestamp() = default;
+	TimePoint tp;
 
-	explicit Timestamp(int64_t micro_seconds) : micro_seconds_(micro_seconds)
+	explicit Timestamp(
+		TimePoint t =
+			std::chrono::time_point_cast<TimePoint::duration>(Clock::now()))
+		: tp(t)
 	{
 	}
 
-	~Timestamp() = default;
+	std::strong_ordering operator<=>(const Timestamp& other) const
+	{
+		return tp <=> other.tp;
+	}
 
-	static Timestamp now();
-	static Timestamp addTime(Timestamp timestamp, double add_seconds);
+	bool operator==(const Timestamp& other) const
+	{
+		return (*this <=> other) == 0;
+	}
+
+	static Timestamp now()
+	{
+		return Timestamp();
+	}
 
 	std::string toFormattedString(bool date = true, bool time = true) const;
-
-	int64_t microseconds() const
-	{
-		return micro_seconds_;
-	}
-
-	auto operator<=>(const Timestamp& rhs) const = default;
 
 	friend std::ostream& operator<<(std::ostream& os, const Timestamp& ts);
 };

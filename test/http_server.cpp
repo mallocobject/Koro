@@ -1,10 +1,15 @@
 #include "elog/logger.h"
+#include "koro/channel.h"
 #include "koro/hook.h"
 #include "koro/io_manager.h"
 #include <arpa/inet.h>
 #include <asm-generic/socket.h>
 #include <cassert>
+#include <csignal>
+#include <cstddef>
+#include <mutex>
 #include <netinet/in.h>
+#include <shared_mutex>
 #include <string>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -12,6 +17,8 @@ using namespace koro;
 
 int main()
 {
+	::signal(SIGPIPE, SIG_IGN);
+
 	int listen_fd = ::socket(AF_INET, SOCK_STREAM, 0);
 	int reuse = 1;
 	::setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
@@ -24,6 +31,8 @@ int main()
 	int ret =
 		::bind(listen_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
 	::listen(listen_fd, SOMAXCONN);
+
+	iom.init();
 
 	auto task = [listen_fd]
 	{
@@ -57,6 +66,22 @@ int main()
 		}
 	};
 	iom.submit(task);
+
+	auto timer_task = []
+	{
+		iom.runEvery(60,
+					 []
+					 {
+						 std::unique_lock<std::shared_mutex> lock(ctable.mtx);
+						 size_t sz = ctable.chs.size();
+						 while (sz > 0 && !ctable.chs[sz - 1])
+						 {
+							 --sz;
+						 }
+						 ctable.chs.resize(sz);
+					 });
+	};
+	iom.submit(timer_task);
 
 	LOG_INFO << "HTTP Server is running on http://127.0.0.1:8080";
 

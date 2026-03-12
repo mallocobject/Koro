@@ -27,7 +27,7 @@ set_property(CACHE LOG_LEVEL PROPERTY STRINGS
 
 message(STATUS "Current logger level: ${LOG_LEVEL}")
 add_definitions(-DELOG_LEVEL_SETTING=ELOG_${LOG_LEVEL})
-message(STATUS "cmake build mode: ${CMAKE_BUILD_TYPE}")
+message(STATUS "Cmake build mode: ${CMAKE_BUILD_TYPE}")
 
 add_subdirectory(elog)
 add_subdirectory(koro)

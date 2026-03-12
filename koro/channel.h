@@ -8,6 +8,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <sys/epoll.h>
 #include <utility>
 #include <vector>
@@ -154,7 +155,7 @@ class Channel : public noncopyable
 
 struct ChannelTable : public noncopyable
 {
-	std::mutex mtx;
+	std::shared_mutex mtx;
 	std::vector<std::shared_ptr<Channel>> chs;
 };
 

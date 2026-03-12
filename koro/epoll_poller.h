@@ -23,7 +23,7 @@ class EpollPoller : public noncopyable
 	void updateChannel(Channel* ch);
 	void removeChannel(Channel* ch);
 
-	void poll(std::vector<Channel*>* active_chs, int timeout = -1);
+	void poll(std::vector<epoll_event>* active_evs, int timeout = -1);
 };
 } // namespace koro
 

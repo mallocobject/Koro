@@ -4,6 +4,7 @@
 #include "koro/task.h"
 #include <cassert>
 #include <functional>
+#include <sys/epoll.h>
 #include <unistd.h>
 
 using namespace koro;
@@ -32,6 +33,10 @@ void Channel::update()
 
 void Channel::handleEvent()
 {
+	if (revents_ & (EPOLLERR | EPOLLHUP))
+	{
+		revents_ |= EPOLLIN | EPOLLOUT;
+	}
 	if (revents_ & EPOLLERR)
 	{
 		triggerEvent(EPOLLERR);

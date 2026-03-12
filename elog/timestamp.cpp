@@ -1,35 +1,9 @@
 #include "elog/timestamp.h"
 #include <chrono>
-#include <cstdint>
 #include <ctime>
 #include <format>
 
-namespace elog
-{
-const int kMicroSecond2Second = 1e6;
-} // namespace elog
-
 using namespace elog;
-
-Timestamp Timestamp::now()
-{
-	auto now_us = std::chrono::time_point_cast<std::chrono::microseconds>(
-		std::chrono::system_clock::now());
-
-	int64_t micro_seconds =
-		std::chrono::duration_cast<std::chrono::microseconds>(
-			now_us.time_since_epoch())
-			.count();
-
-	return Timestamp(micro_seconds);
-}
-
-Timestamp Timestamp::addTime(Timestamp timestamp, double add_seconds)
-{
-	int64_t delta = static_cast<int64_t>(add_seconds * kMicroSecond2Second);
-
-	return Timestamp(timestamp.micro_seconds_ + delta);
-}
 
 std::string Timestamp::toFormattedString(bool date, bool time) const
 {
@@ -38,18 +12,19 @@ std::string Timestamp::toFormattedString(bool date, bool time) const
 		return "";
 	}
 
-	int64_t seconds = micro_seconds_ / kMicroSecond2Second;
-	int64_t remaining_micro_seconds = micro_seconds_ % kMicroSecond2Second;
+	auto us = tp.time_since_epoch().count();
+	auto secs = us / 1'000'000;
+	auto micros = us % 1'000'000;
 
 	tm tm_time;
-	localtime_r(&seconds, &tm_time);
+	::localtime_r(&secs, &tm_time);
 
 	if (date && time)
 	{
 		return std::format("{:04d}-{:02d}-{:02d} {:02d}:{:02d}:{:02d}.{:06d}",
 						   tm_time.tm_year + 1900, tm_time.tm_mon + 1,
 						   tm_time.tm_mday, tm_time.tm_hour, tm_time.tm_min,
-						   tm_time.tm_sec, remaining_micro_seconds);
+						   tm_time.tm_sec, micros);
 	}
 	else if (date)
 	{
@@ -58,7 +33,7 @@ std::string Timestamp::toFormattedString(bool date, bool time) const
 	}
 
 	return std::format("{:02d}:{:02d}:{:02d}.{:06d}", tm_time.tm_hour,
-					   tm_time.tm_min, tm_time.tm_sec, remaining_micro_seconds);
+					   tm_time.tm_min, tm_time.tm_sec, micros);
 }
 
 std::ostream& operator<<(std::ostream& os, const Timestamp& ts)

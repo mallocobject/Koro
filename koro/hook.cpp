@@ -16,6 +16,7 @@
 #include <fcntl.h>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <sys/types.h>
 #include <unistd.h>
 #include <utility>
@@ -71,14 +72,19 @@ static ssize_t do_io(int fd, SysFunc sys_func, koro::IOManager::Event event,
 
 		// save task fiber context
 		std::weak_ptr<koro::Fiber> weak_fiber = fiber;
+		std::shared_ptr<std::atomic<bool>> triggered =
+			std::make_shared<std::atomic<bool>>(false);
 
-		auto cb = [weak_fiber]()
+		auto cb = [weak_fiber, triggered]()
 		{
-			if (auto f = weak_fiber.lock())
+			if (!triggered->exchange(true, std::memory_order_acquire))
 			{
-				std::lock_guard<std::mutex> lock(koro::t_task_queue->mtx);
-				koro::t_task_queue->tasks.push_back(
-					std::make_shared<koro::ScheduledTask>(f));
+				if (auto f = weak_fiber.lock())
+				{
+					std::lock_guard<std::mutex> lock(koro::t_task_queue->mtx);
+					koro::t_task_queue->tasks.push_back(
+						std::make_shared<koro::ScheduledTask>(f));
+				}
 			}
 		};
 		bool ret = koro::iom.registerEvent(ch, event, cb, true);
@@ -103,7 +109,7 @@ extern "C"
 		std::call_once(flag, init_hooks);
 		std::shared_ptr<koro::Channel> ch;
 		{
-			std::lock_guard<std::mutex> lock(koro::ctable.mtx);
+			std::unique_lock<std::shared_mutex> lock(koro::ctable.mtx);
 			if (fd >= 0 && fd < koro::ctable.chs.size())
 			{
 				// std::cout << koro::ctable.chs[fd].use_count() << std::endl;
